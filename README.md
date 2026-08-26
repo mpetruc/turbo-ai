@@ -6,6 +6,26 @@
 
 **Turbo-AI** is an authentic Turbo Pascal 7.0 / Borland DOS inspired Terminal UI (TUI) frontend for the **[Pi coding agent](https://github.com/earendil-works/pi-mono)**. It spawns Pi in RPC mode (`pi --mode rpc`) and drives it over its JSONL protocol, delivering an authentic early-1990s Borland IDE development experience with full mouse, hotkey, and multi-window support.
 
+> *A loving homage to Turbo Pascal 7.1. Not affiliated with Borland International.*
+
+```text
+ ≡ File  Edit  Search  Run  Compile  Debug  Tools  Options  Window  Help ≡
+╔═[■]═══════ FILES ═══════[▲]═╦═[■]═══════════════ AGENT.PAS ═══════════════ 1 ═[▲]═╗
+║ ▼ src                       ║ > Inspect the authentication subsystem              ║
+║   commands/                 ║                                                     ║
+║     commands.ts             ║ Thinking step 1: analyze auth flow... (in gray)     ║
+║   ui/                       ║                                                     ║
+║     agent-panel.ts          ║ I have reviewed the code and prepared the patch.    ║
+║     menu-bar.ts             ║ [READ   ] src/auth.ts                               ║
+║   main.ts                   ║ [EDIT   ] src/auth.ts                               ║
+║   package.json              ║ [OK     ] exit 0: 55 tests passed                   ║
+║                             ║                                                     ║
+║                             ╠═[■]══ opencode/x-preview-f-free [high] [BUILD] ◄ ══ 2 ═[▲]═╣
+║                             ║ > _                                                 ║
+╚═ 1/18 ════════════════════▲═╩═ 1:1 ═════════════════════════════════════════════▲═╝
+ opencode/x-preview-f-free │ 18.4k tokens │ IDLE │ main (+12 -3) │ 1.4s
+ F1 Help  F2 Save  F3 Open  F4 Model  F5 Effort  F6 Mode  F7 Diff  F8 Test  F9 Build  F10 Menu
+```
 <p align="center">
   <img src="assets/screenshot-menu.png" width="49%" alt="Turbo-AI Main Interface & Menu" />
   <img src="assets/screenshot-about.png" width="49%" alt="Turbo-AI About Dialog & Thinking" />

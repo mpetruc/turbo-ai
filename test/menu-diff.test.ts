@@ -243,41 +243,41 @@ test("getKeyBarSlotAtX maps exact character columns to F1-F10 slots", () => {
 	assert.equal(getKeyBarSlotAtX(1, cols), 0);
 	assert.equal(getKeyBarSlotAtX(5, cols), 0);
 
-	// F2 Save is at x=11..17 -> slot 1
-	assert.equal(getKeyBarSlotAtX(11, cols), 1);
-	assert.equal(getKeyBarSlotAtX(15, cols), 1);
+	// F2 Save is at x=10..16 -> slot 1
+	assert.equal(getKeyBarSlotAtX(10, cols), 1);
+	assert.equal(getKeyBarSlotAtX(14, cols), 1);
 
-	// F3 Open is at x=21..27 -> slot 2
-	assert.equal(getKeyBarSlotAtX(21, cols), 2);
-	assert.equal(getKeyBarSlotAtX(25, cols), 2);
+	// F3 Open is at x=19..25 -> slot 2
+	assert.equal(getKeyBarSlotAtX(19, cols), 2);
+	assert.equal(getKeyBarSlotAtX(23, cols), 2);
 
-	// F4 Model is at x=31..38 -> slot 3
-	assert.equal(getKeyBarSlotAtX(31, cols), 3);
-	assert.equal(getKeyBarSlotAtX(36, cols), 3);
+	// F4 Model is at x=28..35 -> slot 3
+	assert.equal(getKeyBarSlotAtX(28, cols), 3);
+	assert.equal(getKeyBarSlotAtX(32, cols), 3);
 
-	// F5 Effort is at x=42..50 -> slot 4
-	assert.equal(getKeyBarSlotAtX(42, cols), 4);
-	assert.equal(getKeyBarSlotAtX(48, cols), 4);
+	// F5 Effort is at x=38..46 -> slot 4
+	assert.equal(getKeyBarSlotAtX(38, cols), 4);
+	assert.equal(getKeyBarSlotAtX(43, cols), 4);
 
-	// F6 Mode is at x=54..60 -> slot 5
-	assert.equal(getKeyBarSlotAtX(54, cols), 5);
-	assert.equal(getKeyBarSlotAtX(58, cols), 5);
+	// F6 Mode is at x=49..55 -> slot 5
+	assert.equal(getKeyBarSlotAtX(49, cols), 5);
+	assert.equal(getKeyBarSlotAtX(53, cols), 5);
 
-	// F7 Diff is at x=64..70 -> slot 6
-	assert.equal(getKeyBarSlotAtX(64, cols), 6);
-	assert.equal(getKeyBarSlotAtX(68, cols), 6);
+	// F7 Diff is at x=58..64 -> slot 6
+	assert.equal(getKeyBarSlotAtX(58, cols), 6);
+	assert.equal(getKeyBarSlotAtX(62, cols), 6);
 
-	// F8 Test is at x=74..80 -> slot 7
-	assert.equal(getKeyBarSlotAtX(74, cols), 7);
-	assert.equal(getKeyBarSlotAtX(78, cols), 7);
+	// F8 Test is at x=67..73 -> slot 7
+	assert.equal(getKeyBarSlotAtX(67, cols), 7);
+	assert.equal(getKeyBarSlotAtX(71, cols), 7);
 
-	// F9 Build is at x=84..91 -> slot 8
-	assert.equal(getKeyBarSlotAtX(84, cols), 8);
-	assert.equal(getKeyBarSlotAtX(89, cols), 8);
+	// F9 Build is at x=76..83 -> slot 8
+	assert.equal(getKeyBarSlotAtX(76, cols), 8);
+	assert.equal(getKeyBarSlotAtX(80, cols), 8);
 
-	// F10 Menu is at x=95..102 -> slot 9
-	assert.equal(getKeyBarSlotAtX(95, cols), 9);
-	assert.equal(getKeyBarSlotAtX(100, cols), 9);
+	// F10 Menu is at x=86..93 -> slot 9
+	assert.equal(getKeyBarSlotAtX(86, cols), 9);
+	assert.equal(getKeyBarSlotAtX(90, cols), 9);
 
 	// Far right outside key bar items -> null
 	assert.equal(getKeyBarSlotAtX(115, cols), null);

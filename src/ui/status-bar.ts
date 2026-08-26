@@ -95,7 +95,7 @@ export function getKeyBarSlotRanges(cols: number, thinking = false): KeyBarSlotR
 
 		x += itemWidth;
 		if (i < KEY_BAR_ITEMS.length - 1 && x < cols - rightMargin - 2) {
-			x += 3; // " │ "
+			x += 2; // "  "
 		}
 	}
 	return ranges;
@@ -153,14 +153,14 @@ export function renderKeyBar(
 		return;
 	}
 
-	// 3. Normal hotkey bar
+	// 3. Normal hotkey bar (separated by spaces without vertical bars, authentic TP 7.0 style)
 	const rightMargin = thinking ? 22 : 2;
 
 	for (let i = 0; i < KEY_BAR_ITEMS.length; i++) {
 		const item = KEY_BAR_ITEMS[i];
 		if (!item) continue;
 		const [k, label] = item;
-		const needed = k.length + label.length + 3;
+		const needed = k.length + label.length + 2;
 		if (x + needed >= cols - rightMargin) break;
 
 		screen.text(x, y, k, keyAttr);
@@ -169,8 +169,8 @@ export function renderKeyBar(
 		x += label.length + 1;
 
 		if (i < KEY_BAR_ITEMS.length - 1 && x < cols - rightMargin - 2) {
-			screen.text(x, y, " \u2502 ", divAttr);
-			x += 3;
+			screen.text(x, y, "  ", txtAttr);
+			x += 2;
 		}
 	}
 
