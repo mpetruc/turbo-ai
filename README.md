@@ -6,8 +6,6 @@
 
 **Turbo-AI** is an authentic Turbo Pascal 7.0 / Borland DOS inspired Terminal UI (TUI) frontend for the **[Pi coding agent](https://github.com/earendil-works/pi-mono)**. It spawns Pi in RPC mode (`pi --mode rpc`) and drives it over its JSONL protocol, delivering an authentic early-1990s Borland IDE development experience with full mouse, hotkey, and multi-window support.
 
-```
-
 <p align="center">
   <img src="assets/screenshot-menu.png" width="49%" alt="Turbo-AI Main Interface & Menu" />
   <img src="assets/screenshot-about.png" width="49%" alt="Turbo-AI About Dialog & Thinking" />
