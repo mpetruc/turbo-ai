@@ -2,6 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { AgentPanel } from "../ui/agent-panel.js";
+import { toolTag, toolSummary } from "../rpc/events.js";
 
 /** Read `enabledModels` from Pi's settings.json. Returns null when unavailable/empty. */
 export function readEnabledModels(): string[] | null {
@@ -497,4 +499,87 @@ export function getProjectSessions(projectCwd: string): SessionSummary[] {
 	// Sort by newest first
 	results.sort((a, b) => b.mtime - a.mtime);
 	return results;
+}
+
+/**
+ * Parses a Pi JSONL session file and populates the AgentPanel with historical conversation entries.
+ * Returns metadata such as last used model and thinking level.
+ */
+export function loadJsonlSessionToPanel(
+	filePath: string,
+	panel: AgentPanel,
+): { model?: string; thinkingLevel?: string; title?: string } {
+	panel.clear();
+	if (!fs.existsSync(filePath)) return {};
+
+	let extractedModel: string | undefined = undefined;
+	let extractedThinkingLevel: string | undefined = undefined;
+	let extractedTitle: string | undefined = undefined;
+
+	try {
+		const content = fs.readFileSync(filePath, "utf8");
+		const lines = content.split("\n");
+
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			let obj: any;
+			try {
+				obj = JSON.parse(line);
+			} catch {
+				continue;
+			}
+
+			if (obj.type === "session") {
+				if (obj.sessionName) extractedTitle = String(obj.sessionName);
+			} else if (obj.type === "set_session_name" && obj.name) {
+				extractedTitle = String(obj.name);
+			} else if (obj.type === "model_change" && obj.modelId) {
+				extractedModel = obj.provider ? `${obj.provider}/${obj.modelId}` : String(obj.modelId);
+			} else if (obj.type === "thinking_level_change" && obj.thinkingLevel) {
+				extractedThinkingLevel = String(obj.thinkingLevel);
+			} else if (obj.type === "message" && obj.message) {
+				const role = obj.message.role;
+				const msgContent = obj.message.content;
+
+				if (role === "user") {
+					let userText = "";
+					if (typeof msgContent === "string") {
+						userText = msgContent;
+					} else if (Array.isArray(msgContent)) {
+						userText = msgContent
+							.filter((c: any) => c.type === "text" && c.text)
+							.map((c: any) => c.text)
+							.join("\n");
+					}
+					if (userText) {
+						panel.addUserMessage(userText);
+					}
+				} else if (role === "assistant") {
+					if (typeof msgContent === "string") {
+						panel.addEntry({ kind: "agent", text: msgContent });
+					} else if (Array.isArray(msgContent)) {
+						for (const part of msgContent) {
+							if (part.type === "thinking" && part.thinking) {
+								panel.addEntry({ kind: "thinking", text: part.thinking });
+							} else if (part.type === "text" && part.text) {
+								panel.addEntry({ kind: "agent", text: part.text });
+							} else if (part.type === "tool_call" || part.type === "tool_use" || part.name) {
+								const tName = part.name ?? part.toolName ?? "tool";
+								const summary = toolSummary(tName, part.arguments ?? part.input ?? {});
+								panel.addEntry({ kind: "tool", tag: summary.tag, text: summary.text });
+							}
+						}
+					}
+				}
+			} else if (obj.type === "tool_execution_start") {
+				const summary = toolSummary(obj.toolName ?? "tool", obj.args);
+				panel.addEntry({ kind: "tool", tag: summary.tag, text: summary.text });
+			}
+		}
+	} catch (err: any) {
+		panel.addEntry({ kind: "error", text: `Error loading session: ${err.message}` });
+	}
+
+	panel.scrollToBottom();
+	return { model: extractedModel, thinkingLevel: extractedThinkingLevel, title: extractedTitle };
 }

@@ -4,7 +4,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SessionSelector } from "../src/ui/session-selector.js";
-import { getProjectSessions, type SessionSummary } from "../src/commands/commands.js";
+import { AgentPanel } from "../src/ui/agent-panel.js";
+import { getProjectSessions, loadJsonlSessionToPanel, type SessionSummary } from "../src/commands/commands.js";
 import { Screen } from "../src/ui/screen.js";
 
 test("SessionSelector navigation, pagination and digit search", () => {
@@ -73,3 +74,33 @@ test("getProjectSessions scans project directory and returns sessions", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
 });
+
+test("loadJsonlSessionToPanel parses JSONL lines and populates AgentPanel", () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-load-jsonl-"));
+	const panel = new AgentPanel();
+
+	try {
+		const jsonlPath = path.join(tmpDir, "test-session.jsonl");
+		const sampleLines = [
+			JSON.stringify({ type: "session", version: 3, id: "abc", cwd: tmpDir, sessionName: "TEST_SESSION" }),
+			JSON.stringify({ type: "model_change", provider: "openrouter", modelId: "deepseek-r1" }),
+			JSON.stringify({ type: "thinking_level_change", thinkingLevel: "high" }),
+			JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "How to fix the auth bug?" }] } }),
+			JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "Analyzing..." }, { type: "text", text: "Here is the fix." }] } }),
+		].join("\n");
+
+		fs.writeFileSync(jsonlPath, sampleLines, "utf8");
+
+		const meta = loadJsonlSessionToPanel(jsonlPath, panel);
+		assert.equal(meta.title, "TEST_SESSION");
+		assert.equal(meta.model, "openrouter/deepseek-r1");
+		assert.equal(meta.thinkingLevel, "high");
+
+		const exportText = panel.getExportText();
+		assert.ok(exportText.includes("How to fix the auth bug?"));
+		assert.ok(exportText.includes("Here is the fix."));
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+

@@ -22,7 +22,7 @@ import { Terminal, type KeyEvent, type MouseEvent } from "./utils/terminal.js";
 import { ProviderDialog, type ProviderEntry } from "./ui/provider-dialog.js";
 import { AddModelDialog, type AddModelResult } from "./ui/add-model-dialog.js";
 import { SessionSelector } from "./ui/session-selector.js";
-import { collectGitInfo, copyToClipboard, filterEnabledModels, gitDiff, gitLog, getSystemInfo, readPreview, readEnvKey, writeEnvKey, saveCustomModel, setCustomModelReasoning, getProjectSessions, type GitInfo, type SessionSummary } from "./commands/commands.js";
+import { collectGitInfo, copyToClipboard, filterEnabledModels, gitDiff, gitLog, getSystemInfo, readPreview, readEnvKey, writeEnvKey, saveCustomModel, setCustomModelReasoning, getProjectSessions, loadJsonlSessionToPanel, type GitInfo, type SessionSummary } from "./commands/commands.js";
 
 type Overlay =
 	| { kind: "menu"; state: MenuState; x: number; y: number }
@@ -2246,17 +2246,19 @@ class App {
 	private async loadRecentSession(name: string): Promise<void> {
 		const target = path.resolve(this.cwd, name);
 		if (target.endsWith(".jsonl") && fs.existsSync(target)) {
+			const meta = loadJsonlSessionToPanel(target, this.panel);
+			if (meta.model) this.model = meta.model;
+			if (meta.thinkingLevel) this.thinkingLevel = meta.thinkingLevel === "off" ? null : meta.thinkingLevel;
+
 			const resp = await this.client.request({ type: "switch_session", sessionPath: target });
 			if (resp.success) {
-				const base = path.basename(target).toUpperCase();
+				const base = meta.title || path.basename(target).toUpperCase();
 				this.sessionName = base;
 				this.addRecentSession(base);
-				this.panel.clear();
-				this.panel.setStatus(`Switched to session: ${base}`);
-				this.flash(`Session switched: ${base}`);
+				this.flash(`Session resumed: ${base}`);
 				void this.pollStats();
 			} else {
-				this.flash(resp.error ?? "Failed to switch session");
+				this.flash(resp.error ?? "Failed to switch session in Pi");
 			}
 			this.markDirty();
 			return;
@@ -2271,6 +2273,7 @@ class App {
 				this.addRecentSession(base);
 				this.panel.addEntry({ kind: "info", text: `Loaded session: ${base}` });
 				this.panel.addEntry({ kind: "agent", text: content });
+				this.panel.scrollToBottom();
 				this.flash(`Session loaded: ${base}`);
 			} catch (err: any) {
 				this.flash(`Load failed: ${err.message}`);
