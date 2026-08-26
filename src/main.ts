@@ -21,11 +21,13 @@ import { mapKey, type AppAction } from "./utils/keys.js";
 import { Terminal, type KeyEvent, type MouseEvent } from "./utils/terminal.js";
 import { ProviderDialog, type ProviderEntry } from "./ui/provider-dialog.js";
 import { AddModelDialog, type AddModelResult } from "./ui/add-model-dialog.js";
-import { collectGitInfo, copyToClipboard, filterEnabledModels, gitDiff, gitLog, getSystemInfo, readPreview, readEnvKey, writeEnvKey, saveCustomModel, setCustomModelReasoning, type GitInfo } from "./commands/commands.js";
+import { SessionSelector } from "./ui/session-selector.js";
+import { collectGitInfo, copyToClipboard, filterEnabledModels, gitDiff, gitLog, getSystemInfo, readPreview, readEnvKey, writeEnvKey, saveCustomModel, setCustomModelReasoning, getProjectSessions, type GitInfo, type SessionSummary } from "./commands/commands.js";
 
 type Overlay =
 	| { kind: "menu"; state: MenuState; x: number; y: number }
 	| { kind: "model"; selector: ModelSelector }
+	| { kind: "session"; selector: SessionSelector }
 	| { kind: "help" }
 	| { kind: "about"; dialog: AboutDialog }
 	| { kind: "text"; popup: TextPopup }
@@ -86,6 +88,7 @@ class App {
 		| { kind: "diff"; trackY: number; trackH: number }
 		| { kind: "text"; trackY: number; trackH: number }
 		| { kind: "model"; trackY: number; trackH: number }
+		| { kind: "session"; trackY: number; trackH: number }
 		| null = null;
 	private activeSelection: { kind: "agent" | "input" | "text" | "diff" } | null = null;
 	private planMode = false;
@@ -292,6 +295,9 @@ class App {
 				case "model":
 					this.overlay.selector.render(this.screen);
 					break;
+				case "session":
+					this.overlay.selector.render(this.screen);
+					break;
 				case "help":
 					renderHelp(this.screen);
 					break;
@@ -448,6 +454,9 @@ class App {
 				} else if (this.overlay.kind === "model") {
 					if (delta < 0) this.overlay.selector.up();
 					else this.overlay.selector.down();
+				} else if (this.overlay.kind === "session") {
+					if (delta < 0) this.overlay.selector.up();
+					else this.overlay.selector.down();
 				}
 				return;
 			}
@@ -522,6 +531,9 @@ class App {
 						break;
 					case "model":
 						if (this.overlay?.kind === "model") this.overlay.selector.scrollToRatio(ratio);
+						break;
+					case "session":
+						if (this.overlay?.kind === "session") this.overlay.selector.scrollToRatio(ratio);
 						break;
 				}
 				this.markDirty();
@@ -784,6 +796,66 @@ class App {
 							}
 							ov.selector.index = targetIdx;
 						}
+					}
+					return;
+				}
+
+				case "session": {
+					const r = ov.selector.rect;
+					const closeBox = evt.y === r.y && evt.x >= r.x + 2 && evt.x <= r.x + 4;
+					if (closeBox || !isInRect(evt.x, evt.y, r)) {
+						this.closeOverlay();
+						return;
+					}
+					const a = inner(r);
+					const listY = a.y + 2;
+					const visibleRows = Math.max(1, a.h - 3);
+
+					// Scrollbar in session selector
+					const scrollX = a.x + a.w - 1;
+					if (evt.x === scrollX && evt.y >= listY - 1 && evt.y <= listY + visibleRows) {
+						if (evt.y === listY - 1) {
+							ov.selector.up();
+							this.markDirty();
+							return;
+						}
+						if (evt.y === listY + visibleRows) {
+							ov.selector.down();
+							this.markDirty();
+							return;
+						}
+						const trackH = visibleRows;
+						const clickRow = evt.y - listY;
+						const thumbRow = ov.selector.getThumbRow(trackH);
+						this.activeDrag = { kind: "session", trackY: listY, trackH };
+						if (clickRow < thumbRow) {
+							ov.selector.pageUp();
+						} else if (clickRow > thumbRow) {
+							ov.selector.pageDown();
+						}
+						this.markDirty();
+						return;
+					}
+
+					// Clicking a row in the session list
+					if (evt.y >= listY && evt.y < listY + visibleRows) {
+						const clickedRow = evt.y - listY;
+						let startIdx = 0;
+						if (ov.selector.index >= visibleRows) {
+							startIdx = ov.selector.index - visibleRows + 1;
+						}
+						const targetIdx = startIdx + clickedRow;
+						if (targetIdx >= 0 && targetIdx < ov.selector.sessions.length) {
+							if (ov.selector.index === targetIdx) {
+								const s = ov.selector.current();
+								this.closeOverlay();
+								if (s) void this.loadRecentSession(s.path);
+								return;
+							}
+							ov.selector.index = targetIdx;
+							this.markDirty();
+						}
+						return;
 					}
 					return;
 				}
@@ -1536,6 +1608,54 @@ class App {
 			return;
 		}
 
+		if (ov.kind === "session") {
+			switch (action.kind) {
+				case "esc":
+					this.closeOverlay();
+					return;
+				case "up":
+					ov.selector.up();
+					this.markDirty();
+					return;
+				case "down":
+					ov.selector.down();
+					this.markDirty();
+					return;
+				case "pageup":
+					ov.selector.pageUp();
+					this.markDirty();
+					return;
+				case "pagedown":
+					ov.selector.pageDown();
+					this.markDirty();
+					return;
+				case "home":
+					ov.selector.home();
+					this.markDirty();
+					return;
+				case "end":
+					ov.selector.end();
+					this.markDirty();
+					return;
+				case "char": {
+					const idx = ov.selector.findByDigit(action.ch);
+					if (idx !== null) {
+						const s = ov.selector.current();
+						this.closeOverlay();
+						if (s) void this.loadRecentSession(s.path);
+					}
+					return;
+				}
+				case "enter": {
+					const s = ov.selector.current();
+					this.closeOverlay();
+					if (s) void this.loadRecentSession(s.path);
+					return;
+				}
+			}
+			return;
+		}
+
 		if (ov.kind === "diff") {
 			switch (action.kind) {
 				case "esc":
@@ -2007,26 +2127,13 @@ class App {
 					void this.loadRecentSession(arg);
 					return true;
 				}
-
-				this.panel.addUserMessage(text);
-				this.panel.addEntry({ kind: "info", text: "=== RECENT & AVAILABLE SESSIONS ===" });
-				if (this.recentSessions.length === 0) {
-					this.panel.addEntry({ kind: "info", text: "No saved or recent sessions found." });
-				} else {
-					for (let i = 0; i < this.recentSessions.length; i++) {
-						const s = this.recentSessions[i];
-						this.panel.addEntry({ kind: "info", text: `  ${i + 1}. ${s}` });
-					}
-					this.panel.addEntry({ kind: "info", text: "Type /resume <number> or /open <name> to load a session." });
-				}
-				this.flash(`Sessions listed (${this.recentSessions.length})`);
-				this.markDirty();
+				this.openSessionSelector();
 				return true;
 			}
 
 			case "/resume": {
 				if (!arg) {
-					this.openSavedSession();
+					this.openSessionSelector();
 				} else {
 					const num = parseInt(arg, 10);
 					if (!isNaN(num) && num >= 1 && num <= this.recentSessions.length) {
@@ -2123,28 +2230,17 @@ class App {
 		});
 	}
 
+	private openSessionSelector(): void {
+		const { cols, rows } = this.term.size();
+		const selector = new SessionSelector(cols, rows);
+		const sessions = getProjectSessions(this.cwd);
+		selector.setSessions(sessions);
+		this.overlay = { kind: "session", selector };
+		this.markDirty();
+	}
+
 	private openSavedSession(): void {
-		this.openPrompt("Open Saved Session File", "", (filename) => {
-			if (!filename.trim()) return;
-			const target = path.resolve(this.cwd, filename.trim());
-			if (!fs.existsSync(target)) {
-				this.flash(`File not found: ${filename}`);
-				return;
-			}
-			try {
-				const content = fs.readFileSync(target, "utf8");
-				this.panel.clear();
-				const base = path.basename(target).toUpperCase();
-				this.sessionName = base;
-				this.addRecentSession(base);
-				this.panel.addEntry({ kind: "info", text: `Loaded session: ${base}` });
-				this.panel.addEntry({ kind: "agent", text: content });
-				this.flash(`Session loaded: ${base}`);
-			} catch (err: any) {
-				this.flash(`Load failed: ${err.message}`);
-			}
-			this.markDirty();
-		});
+		this.openSessionSelector();
 	}
 
 	private async loadRecentSession(name: string): Promise<void> {

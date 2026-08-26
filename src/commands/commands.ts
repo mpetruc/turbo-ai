@@ -374,3 +374,127 @@ export function setCustomModelReasoning(providerId: string, modelId: string, rea
 		saveCustomModel(providerId, { id: modelId, name: modelId, reasoning });
 	}
 }
+
+export interface SessionSummary {
+	id: string;
+	title: string;
+	firstPrompt: string;
+	model?: string;
+	date: string;
+	path: string;
+	mtime: number;
+}
+
+export function getProjectSessions(projectCwd: string): SessionSummary[] {
+	const results: SessionSummary[] = [];
+	const normalizedCwd = path.resolve(projectCwd).toLowerCase();
+
+	// 1. Scan Pi's global session repository: ~/.pi/agent/sessions/
+	const sessionsBaseDir = path.join(os.homedir(), ".pi", "agent", "sessions");
+	if (fs.existsSync(sessionsBaseDir)) {
+		try {
+			const subdirs = fs.readdirSync(sessionsBaseDir);
+			for (const dirName of subdirs) {
+				const fullDir = path.join(sessionsBaseDir, dirName);
+				let stat: fs.Stats;
+				try {
+					stat = fs.statSync(fullDir);
+				} catch {
+					continue;
+				}
+				if (!stat.isDirectory()) continue;
+
+				// Read jsonl session files in this directory
+				let files: string[] = [];
+				try {
+					files = fs.readdirSync(fullDir).filter((f) => f.endsWith(".jsonl"));
+				} catch {
+					continue;
+				}
+
+				for (const file of files) {
+					const filePath = path.join(fullDir, file);
+					try {
+						const fileStat = fs.statSync(filePath);
+						const content = fs.readFileSync(filePath, "utf8");
+						const lines = content.split("\n");
+						if (lines.length === 0) continue;
+
+						let sessionCwd = "";
+						let sessionDate = fileStat.mtime.toISOString().slice(0, 16).replace("T", " ");
+						let firstPrompt = "(no prompt)";
+						let modelName: string | undefined = undefined;
+						let customName: string | undefined = undefined;
+
+						for (const l of lines) {
+							if (!l.trim()) continue;
+							try {
+								const obj = JSON.parse(l);
+								if (obj.type === "session") {
+									if (obj.cwd) sessionCwd = String(obj.cwd);
+									if (obj.sessionName) customName = String(obj.sessionName);
+								} else if (obj.type === "set_session_name" && obj.name) {
+									customName = String(obj.name);
+								} else if (obj.type === "model_change" && obj.modelId) {
+									modelName = obj.provider ? `${obj.provider}/${obj.modelId}` : String(obj.modelId);
+								} else if (obj.type === "message" && obj.message?.role === "user" && firstPrompt === "(no prompt)") {
+									const textPart = Array.isArray(obj.message.content)
+										? obj.message.content.find((c: any) => c.type === "text")?.text
+										: typeof obj.message.content === "string" ? obj.message.content : "";
+									if (textPart) {
+										let clean = textPart.replace(/\[PLAN MODE:[^\]]+\]\s*/i, "").trim();
+										if (clean.length > 50) clean = clean.slice(0, 49) + "…";
+										firstPrompt = clean || "(empty prompt)";
+									}
+								} else if (obj.type === "message" && obj.message?.role === "assistant" && !modelName && obj.model) {
+									modelName = obj.provider ? `${obj.provider}/${obj.model}` : String(obj.model);
+								}
+							} catch {}
+						}
+
+						// Check if this session matches current project cwd
+						if (sessionCwd && path.resolve(sessionCwd).toLowerCase() === normalizedCwd) {
+							const title = customName || file.replace(/\.jsonl$/i, "").slice(0, 24);
+							results.push({
+								id: file,
+								title,
+								firstPrompt,
+								model: modelName,
+								date: sessionDate,
+								path: filePath,
+								mtime: fileStat.mtimeMs,
+							});
+						}
+					} catch {}
+				}
+			}
+		} catch {}
+	}
+
+	// 2. Scan saved markdown session files in current working directory
+	try {
+		const cwdFiles = fs.readdirSync(projectCwd);
+		for (const f of cwdFiles) {
+			if (f.endsWith(".md") && (f.startsWith("NONAME") || f.includes("SESSION") || f.includes("TASK") || f.toLowerCase().includes("session"))) {
+				const fullP = path.join(projectCwd, f);
+				try {
+					const s = fs.statSync(fullP);
+					if (s.isFile()) {
+						results.push({
+							id: f,
+							title: f,
+							firstPrompt: "Saved Markdown Session",
+							date: s.mtime.toISOString().slice(0, 16).replace("T", " "),
+							path: fullP,
+							mtime: s.mtimeMs,
+						});
+					}
+				} catch {}
+			}
+		}
+	} catch {}
+
+	// Sort by newest first
+	results.sort((a, b) => b.mtime - a.mtime);
+	return results;
+}
