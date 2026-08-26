@@ -1334,7 +1334,7 @@ class App {
 				return;
 			case "enter": {
 				const text = this.input.submit();
-				if (text) this.sendPrompt(text);
+				if (text) void this.processInputSubmission(text);
 				return;
 			}
 			case "up":
@@ -1816,6 +1816,223 @@ class App {
 	}
 
 	// -------------------------------------------------------------- commands
+
+	private async processInputSubmission(text: string): Promise<void> {
+		const trimmed = text.trim();
+		if (trimmed.startsWith("/")) {
+			const handled = await this.handleSlashCommand(trimmed);
+			if (handled) return;
+		}
+		this.sendPrompt(text);
+	}
+
+	private async handleSlashCommand(text: string): Promise<boolean> {
+		const trimmed = text.trim();
+		if (!trimmed.startsWith("/")) return false;
+
+		const [cmdWithSlash, ...argParts] = trimmed.split(/\s+/);
+		const cmd = (cmdWithSlash || "").toLowerCase();
+		const arg = argParts.join(" ").trim();
+
+		switch (cmd) {
+			case "/status":
+			case "/stats": {
+				this.panel.addUserMessage(text);
+				const resp = await this.client.request<SessionStatsData>({ type: "get_session_stats" });
+				const stats = resp.data;
+				const percent = stats?.contextUsage?.percent !== undefined && stats?.contextUsage?.percent !== null ? `${stats.contextUsage.percent}%` : "0%";
+				const tokens = stats?.tokens?.total ?? this.contextTokens ?? 0;
+				const costStr = stats?.cost !== undefined ? `$${stats.cost.toFixed(4)}` : "$0.0000";
+				const branchStr = this.gitInfo?.branch ? `${this.gitInfo.branch} (+${this.gitInfo.added ?? 0} -${this.gitInfo.removed ?? 0})` : "no git repo";
+
+				this.panel.addEntry({ kind: "info", text: "=== TURBO-AI SESSION STATUS ===" });
+				this.panel.addEntry({ kind: "info", text: `Session:      ${this.getEffectiveSessionName()}` });
+				this.panel.addEntry({ kind: "info", text: `Active Model: ${this.model ?? "(none)"}` });
+				this.panel.addEntry({ kind: "info", text: `Effort Level: ${this.thinkingLevel ?? "default"}` });
+				this.panel.addEntry({ kind: "info", text: `Mode:         ${this.planMode ? "PLAN (Planning)" : "BUILD (Execution)"}` });
+				this.panel.addEntry({ kind: "info", text: `Directory:    ${this.cwd}` });
+				this.panel.addEntry({ kind: "info", text: `Context:      ${tokens} tokens (${percent})` });
+				this.panel.addEntry({ kind: "info", text: `Est. Cost:    ${costStr}` });
+				this.panel.addEntry({ kind: "info", text: `Git Status:   ${branchStr}` });
+				this.flash("Status displayed");
+				this.markDirty();
+				return true;
+			}
+
+			case "/help":
+			case "/?": {
+				this.overlay = { kind: "help" };
+				this.markDirty();
+				return true;
+			}
+
+			case "/clear":
+			case "/cls": {
+				this.panel.clear();
+				this.flash("Agent view cleared");
+				this.markDirty();
+				return true;
+			}
+
+			case "/compact": {
+				this.panel.addUserMessage(text);
+				void this.compactSession();
+				return true;
+			}
+
+			case "/model": {
+				if (!arg) {
+					void this.openModelSelector();
+				} else {
+					let provider = "openrouter";
+					let modelId = arg;
+					if (arg.includes("/")) {
+						const slash = arg.indexOf("/");
+						provider = arg.slice(0, slash).trim();
+						modelId = arg.slice(slash + 1).trim();
+					}
+					saveCustomModel(provider, { id: modelId, name: modelId, reasoning: true });
+					void this.selectModel({ provider, id: modelId, name: modelId, api: provider, reasoning: true });
+				}
+				return true;
+			}
+
+			case "/effort":
+			case "/thinking": {
+				if (!arg) {
+					void this.cycleThinkingLevel();
+				} else {
+					const level = arg.toLowerCase() as any;
+					const setResp = await this.client.request({
+						type: "set_thinking_level",
+						level,
+					} as unknown as RpcCommand);
+					if (this.model && this.model.includes("/")) {
+						const slash = this.model.indexOf("/");
+						const p = this.model.slice(0, slash);
+						const m = this.model.slice(slash + 1);
+						setCustomModelReasoning(p, m, level !== "off");
+					}
+					this.thinkingLevel = level === "off" ? null : level;
+					this.flash(`Thinking effort: ${level}`);
+					this.panel.addEntry({ kind: "info", text: `Thinking effort set to: ${level}` });
+					this.markDirty();
+				}
+				return true;
+			}
+
+			case "/plan": {
+				if (!arg) {
+					this.planMode = true;
+					this.flash("Mode: PLAN (Planning & Architecture)");
+					this.panel.addEntry({ kind: "info", text: "Active mode set to: PLAN" });
+					this.markDirty();
+					return true;
+				}
+				this.planMode = true;
+				this.sendPrompt(arg);
+				return true;
+			}
+
+			case "/build": {
+				if (!arg) {
+					this.planMode = false;
+					this.flash("Mode: BUILD (Autonomous Execution)");
+					this.panel.addEntry({ kind: "info", text: "Active mode set to: BUILD" });
+					this.markDirty();
+					return true;
+				}
+				this.planMode = false;
+				this.sendPrompt(arg);
+				return true;
+			}
+
+			case "/mode": {
+				this.togglePlanBuildMode();
+				return true;
+			}
+
+			case "/diff": {
+				this.handleAction({ kind: "diff" });
+				return true;
+			}
+
+			case "/test":
+			case "/tests": {
+				void this.runViaRpc("npm test");
+				return true;
+			}
+
+			case "/run": {
+				if (arg) {
+					void this.runViaRpc(arg);
+				} else {
+					this.handleAction({ kind: "run" });
+				}
+				return true;
+			}
+
+			case "/save": {
+				if (arg) {
+					const target = path.resolve(this.cwd, arg.trim());
+					const content = this.panel.getExportText();
+					try {
+						fs.writeFileSync(target, content, "utf8");
+						const base = path.basename(target);
+						this.addRecentSession(base);
+						this.flash(`Session saved to ${base}`);
+						this.panel.addEntry({ kind: "info", text: `Session saved: ${target}` });
+					} catch (err: any) {
+						this.flash(`Save failed: ${err.message}`);
+					}
+					this.markDirty();
+				} else {
+					this.saveSessionToFile();
+				}
+				return true;
+			}
+
+			case "/open": {
+				if (arg) {
+					this.loadRecentSession(arg);
+				} else {
+					this.openSavedSession();
+				}
+				return true;
+			}
+
+			case "/new": {
+				void this.newSession();
+				return true;
+			}
+
+			case "/fork": {
+				void this.forkSessionPrompt();
+				return true;
+			}
+
+			case "/tree":
+			case "/files": {
+				this.focus = "tree";
+				this.flash("Active window: FILES");
+				this.markDirty();
+				return true;
+			}
+
+			case "/export": {
+				void this.exportSession();
+				return true;
+			}
+
+			case "/exit":
+			case "/quit": {
+				this.exit();
+				return true;
+			}
+		}
+
+		return false;
+	}
 
 	private sendPrompt(text: string): void {
 		let fullPrompt = text;
