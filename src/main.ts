@@ -1992,9 +1992,58 @@ class App {
 				return true;
 			}
 
+			case "/sessions":
+			case "/session":
+			case "/history": {
+				if (arg) {
+					const num = parseInt(arg, 10);
+					if (!isNaN(num) && num >= 1 && num <= this.recentSessions.length) {
+						const targetSession = this.recentSessions[num - 1];
+						if (targetSession) {
+							void this.loadRecentSession(targetSession);
+							return true;
+						}
+					}
+					void this.loadRecentSession(arg);
+					return true;
+				}
+
+				this.panel.addUserMessage(text);
+				this.panel.addEntry({ kind: "info", text: "=== RECENT & AVAILABLE SESSIONS ===" });
+				if (this.recentSessions.length === 0) {
+					this.panel.addEntry({ kind: "info", text: "No saved or recent sessions found." });
+				} else {
+					for (let i = 0; i < this.recentSessions.length; i++) {
+						const s = this.recentSessions[i];
+						this.panel.addEntry({ kind: "info", text: `  ${i + 1}. ${s}` });
+					}
+					this.panel.addEntry({ kind: "info", text: "Type /resume <number> or /open <name> to load a session." });
+				}
+				this.flash(`Sessions listed (${this.recentSessions.length})`);
+				this.markDirty();
+				return true;
+			}
+
+			case "/resume": {
+				if (!arg) {
+					this.openSavedSession();
+				} else {
+					const num = parseInt(arg, 10);
+					if (!isNaN(num) && num >= 1 && num <= this.recentSessions.length) {
+						const targetSession = this.recentSessions[num - 1];
+						if (targetSession) {
+							void this.loadRecentSession(targetSession);
+							return true;
+						}
+					}
+					void this.loadRecentSession(arg);
+				}
+				return true;
+			}
+
 			case "/open": {
 				if (arg) {
-					this.loadRecentSession(arg);
+					void this.loadRecentSession(arg);
 				} else {
 					this.openSavedSession();
 				}
@@ -2098,8 +2147,25 @@ class App {
 		});
 	}
 
-	private loadRecentSession(name: string): void {
+	private async loadRecentSession(name: string): Promise<void> {
 		const target = path.resolve(this.cwd, name);
+		if (target.endsWith(".jsonl") && fs.existsSync(target)) {
+			const resp = await this.client.request({ type: "switch_session", sessionPath: target });
+			if (resp.success) {
+				const base = path.basename(target).toUpperCase();
+				this.sessionName = base;
+				this.addRecentSession(base);
+				this.panel.clear();
+				this.panel.setStatus(`Switched to session: ${base}`);
+				this.flash(`Session switched: ${base}`);
+				void this.pollStats();
+			} else {
+				this.flash(resp.error ?? "Failed to switch session");
+			}
+			this.markDirty();
+			return;
+		}
+
 		if (fs.existsSync(target) && fs.statSync(target).isFile()) {
 			try {
 				const content = fs.readFileSync(target, "utf8");
