@@ -10,20 +10,19 @@
 
 ```text
  ≡ File  Edit  Search  Run  Compile  Debug  Tools  Options  Window  Help ≡
-╔═[■]═══════ FILES ═══════[▲]═╦═[■]═══════════════ AGENT.PAS ═══════════════ 1 ═[▲]═╗
-║ ▼ src                       ║ > Inspect the authentication subsystem              ║
-║   commands/                 ║                                                     ║
-║     commands.ts             ║ Thinking step 1: analyze auth flow... (in gray)     ║
-║   ui/                       ║                                                     ║
-║     agent-panel.ts          ║ I have reviewed the code and prepared the patch.    ║
-║     menu-bar.ts             ║ [READ   ] src/auth.ts                               ║
-║   main.ts                   ║ [EDIT   ] src/auth.ts                               ║
-║   package.json              ║ [OK     ] exit 0: 55 tests passed                   ║
-║                             ║                                                     ║
-║                             ╠═[■]══ opencode/x-preview-f-free [high] [BUILD] ◄ ══ 2 ═[▲]═╣
-║                             ║ > _                                                 ║
-╚═ 1/18 ════════════════════▲═╩═ 1:1 ═════════════════════════════════════════════▲═╝
- opencode/x-preview-f-free │ 18.4k tokens │ IDLE │ main (+12 -3) │ 1.4s
+╔═[■]══════ FILES ══════[▲]═╦═[■]═════════════════ AGENT.PAS ════════════════ 1 ═[▲]═╗
+║ ▼ src                     ║ User: Implement session resume & slash commands        ║
+║   commands/               ║                                                        ║
+║     commands.ts           ║ Thinking: Analyzing project session storage...         ║
+║   ui/                     ║                                                        ║
+║     session-selector.ts   ║ [SEARCH ] ~/.pi/agent/sessions/                        ║
+║     agent-panel.ts        ║ [EDIT   ] src/commands/commands.ts                     ║
+║     menu-bar.ts           ║ [EDIT   ] src/main.ts                                  ║
+║   main.ts                 ║ [TEST   ] npm test (59 tests passed)                   ║
+║   package.json            ║                                                        ║
+║                           ╠═[■]══ opencode/x-preview-f-free [high] [BUILD] ◄ 2 ═[▲]╣
+║                           ║ > /resume                                              ║
+╚═ 1/24 ══════════════════▲═╩═ 1:1 ════════════════════════════════════════════════▲═╝
  F1 Help  F2 Save  F3 Open  F4 Model  F5 Effort  F6 Mode  F7 Diff  F8 Test  F9 Build  F10 Menu
 ```
 <p align="center">
@@ -38,8 +37,9 @@
 ### 🏛️ Authentic Turbo Pascal 7.0 / Turbo Vision GUI
 - **16-Color DOS/VGA Palette**: Classic Borland royal blue desktop, double-line frames, and 3D shadow buttons.
 - **Top Menu Bar (10 Menus)**: `File`, `Edit`, `Search`, `Run`, `Compile`, `Debug`, `Tools`, `Options`, `Window`, `Help` with red mnemonic shortcuts (`Alt+F`..`Alt+H`).
+- **Interactive Session Selector (`SessionSelector`)**: Browse and resume project sessions with date/time, task previews, and `1`..`9` fast shortcuts (`F3 Open`, `/resume`, `/sessions`).
 - **Recent Sessions History**: The `File` menu automatically lists up to 9 recently saved/opened sessions with red numbered shortcuts (`1.` .. `9.`).
-- **Complete Mouse Interaction**: Click to focus windows, open menus, select tree files, click window close `[■]` and zoom `[▲]` boxes, click bottom key bar items, and drag to select & copy text.
+- **Complete Mouse Interaction**: Click to focus windows, open menus, select tree files, click window close `[■]` and zoom `[▲]` boxes, scroll lists with mouse wheel, and drag to select & copy text.
 
 ### 🧠 Advanced LLM & Reasoning Workflow
 - **Model Switching (`F4 Model`)**: Browse all available models from Pi, or use `[+] Enter custom model ID...` for quick custom models.
@@ -47,10 +47,11 @@
 - **API Key Configuration (`Options` → `Configure API keys...`)**: Intuitive dialog to configure and securely save provider API keys to local `.env`.
 - **Reasoning Effort Control (`F5 Effort`)**: Dedicated hotkey and status toggle cycling through reasoning effort levels (`low` → `medium` → `high` → `off`), with automatic model reasoning flag enablement.
 - **PLAN / BUILD Modes (`F6 Mode`)**: Switch seamlessly between Architectural Planning mode (`[PLAN]`) and Autonomous Code Execution mode (`[BUILD]`).
-- **Visual Thinking Distinction**: Model reasoning (`thinking_delta`) is rendered in subtle **Gray** (`LIGHTGRAY`), while the final response is rendered in crisp **Bright White** (`WHITE`) with Pascal syntax highlighting.
+- **Visual Thinking Distinction**: Model reasoning (`thinking_delta`) is rendered in subtle **Gray** (`LIGHTGRAY`), while the final response is rendered in crisp **Bright White** (`WHITE`) with syntax highlighting.
+- **Built-in Slash Commands**: Process `/status`, `/help`, `/compact`, `/clear`, `/model`, `/effort`, `/plan`, `/build`, `/diff`, `/test`, `/save`, `/open`, and `/resume` directly from the prompt input.
 
 ### 📁 Codebase Navigation & Git Tools
-- **Project Tree Window**: Live filesystem explorer with folder expand/collapse, git-dirty indicators, and instant file preview (`F3` / Click).
+- **Project Tree Window**: Live filesystem explorer with folder expand/collapse, git-dirty indicators, and instant file preview (`Click` / Enter).
 - **Unified Diff Viewer (`F7 Diff`)**: Color-coded side-by-side / unified diff viewer for git changes.
 - **Test & Build Integration**: Direct execution of `npm test` (`F8 Test`) and `npm run build` (`F9 Build`) through Pi RPC.
 
@@ -62,7 +63,7 @@
 |---|---|
 | **`F1`** | Open Help screen & shortcut reference |
 | **`F2`** | Save current session to file (`.md`) |
-| **`F3`** | Open saved session file / focus Files window |
+| **`F3`** | Open Interactive Session Selector / Browse Sessions |
 | **`F4`** | Select AI Model (from Pi or custom) |
 | **`F5`** | Cycle Reasoning / Thinking Effort (`low` → `medium` → `high` → `off`) |
 | **`F6`** | Toggle **PLAN** / **BUILD** mode |
@@ -93,7 +94,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/earendil-works/turbo-ai.git
+git clone https://github.com/kvv256512-ux/turbo-ai.git
 cd turbo-ai
 
 # Install dependencies
