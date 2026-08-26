@@ -105,7 +105,7 @@ export class AboutDialog {
 		// Centered text lines
 		const lines = [
 			"Turbo AI",
-			"Version 1.0 Beta",
+			"Version 1.01 Beta",
 			"Retro DOS Frontend for Pi Agent",
 			"",
 			"A loving homage to",
@@ -150,7 +150,7 @@ export class AboutDialog {
 
 export const ABOUT_TEXT = [
 	"Turbo AI",
-	"Version 1.0 Beta",
+	"Version 1.01 Beta",
 	"Retro DOS Frontend for Pi Agent",
 	"",
 	"A loving homage to",
