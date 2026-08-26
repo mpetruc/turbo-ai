@@ -1,0 +1,722 @@
+Ниже промпт, который я бы дал **OpenCode с сильной coding-моделью**. Он рассчитан не на демонстрационный mockup, а на создание реально запускаемого MVP.
+
+```text
+# Task: Build "Turbo-AI" — a Turbo Pascal 7 inspired TUI for Pi coding agent
+
+You are working in a local development environment.
+
+Build a real, runnable project called `turbo-ai`.
+
+The goal is NOT to create a visual mockup. The goal is to create a functional terminal UI that acts as an alternative frontend for the Pi coding agent, communicating with Pi through its RPC interface.
+
+The visual language should be strongly inspired by Borland Turbo Pascal 7 / early-1990s DOS IDEs.
+
+============================================================
+1. FIRST: INSPECT THE ENVIRONMENT
+============================================================
+
+Before writing code:
+
+1. Check whether Pi is installed.
+2. Locate the Pi source/package if available.
+3. Inspect Pi's current RPC protocol and the existing example:
+
+   packages/coding-agent/examples/rpc-extension-ui.ts
+
+4. Inspect Pi's current TUI implementation and documentation.
+5. Determine the exact current RPC protocol instead of guessing it.
+6. Inspect package.json and existing TypeScript configuration.
+7. Determine the best way to launch Pi in RPC mode from another process.
+
+Do NOT invent an RPC protocol.
+
+If Pi is installed locally, use the installed/current version.
+
+If Pi source is available locally, use its actual implementation as the authoritative source.
+
+============================================================
+2. ARCHITECTURE
+============================================================
+
+Create a separate frontend:
+
+    turbo-ai/
+        src/
+            main.ts
+
+            rpc/
+                pi-client.ts
+                events.ts
+                types.ts
+
+            ui/
+                screen.ts
+                menu-bar.ts
+                menu.ts
+                project-tree.ts
+                agent-panel.ts
+                input-line.ts
+                status-bar.ts
+                help.ts
+                model-selector.ts
+                diff-viewer.ts
+
+            commands/
+                commands.ts
+
+            theme/
+                turbo-pascal.ts
+
+            utils/
+                terminal.ts
+                layout.ts
+
+Do NOT fork Pi.
+
+Do NOT modify Pi source unless absolutely necessary.
+
+Pi remains the agent/backend.
+
+Turbo-AI is the frontend.
+
+Architecture:
+
+    ┌───────────────────────────────┐
+    │          TURBO-AI             │
+    │                               │
+    │  Menu / Project / Agent / UI  │
+    └───────────────┬───────────────┘
+                    │
+                    │ RPC
+                    ▼
+    ┌───────────────────────────────┐
+    │             PI                │
+    │                               │
+    │  LLM / tools / context / git  │
+    └───────────────────────────────┘
+
+============================================================
+3. TECHNOLOGY
+============================================================
+
+Use TypeScript.
+
+Prefer Pi's own TUI/RPC infrastructure where appropriate.
+
+Do not introduce a large framework unless necessary.
+
+Keep dependencies minimal.
+
+The project must run from a terminal on Windows.
+
+The primary target is Windows 10/11 terminal environments, but avoid unnecessary platform-specific code.
+
+============================================================
+4. VISUAL DESIGN
+============================================================
+
+The UI must look like Turbo Pascal 7.
+
+This is NOT merely a "blue terminal theme".
+
+Use a 16-color DOS/VGA-inspired palette.
+
+Primary colors:
+
+BLACK
+BLUE
+GREEN
+CYAN
+RED
+MAGENTA
+BROWN
+LIGHTGRAY
+
+DARKGRAY
+LIGHTBLUE
+LIGHTGREEN
+LIGHTCYAN
+LIGHTRED
+LIGHTMAGENTA
+YELLOW
+WHITE
+
+Prefer ANSI terminal colors over arbitrary RGB colors.
+
+Default:
+
+    Background: BLUE
+    Normal text: LIGHTGRAY
+    Bright text: WHITE
+    Selected item: BLUE background + LIGHTGRAY/WHITE foreground
+    Menu bar: LIGHTGRAY background + BLACK/BLUE text
+    Highlight: YELLOW
+    Error: LIGHTRED
+    Success: LIGHTGREEN
+
+Avoid:
+
+- gradients
+- rounded corners
+- modern icons
+- emoji
+- excessive Unicode symbols
+- animations
+- modern dashboard aesthetics
+
+Use classic rectangular borders.
+
+Use box drawing characters only where appropriate.
+
+The UI should feel like:
+
+    Turbo Pascal 7
+    Borland IDE
+    Norton Commander
+    DOS text-mode applications
+
+============================================================
+5. MAIN SCREEN
+============================================================
+
+Implement this general layout:
+
+┌─ File ─ Edit ─ Search ─ Agent ─ Run ─ Git ─ Tools ─ Help ────────┐
+│ TURBO-AI                                             Pi Agent    │
+├───────────────────────┬──────────────────────────────────────────┤
+│ PROJECT               │ AGENT                                    │
+│                       │                                          │
+│ > src                 │ You                                      │
+│   main.ts             │ > Fix the login bug                      │
+│   api.ts              │                                          │
+│   auth.ts             │ Agent                                    │
+│                       │ > I'll inspect the authentication code.  │
+│ > tests               │                                          │
+│   auth.test.ts        │ [READ] src/auth.ts                       │
+│                       │ [READ] src/api.ts                        │
+│ > package.json        │                                          │
+│                       │ Problem found.                           │
+│                       │                                          │
+│                       │ [EDIT] src/auth.ts                       │
+│                       │                                          │
+├───────────────────────┴──────────────────────────────────────────┤
+│ GLM-5.3 | 18.4k tokens | BUILD | main | +2 -1 | 12.3s           │
+├──────────────────────────────────────────────────────────────────┤
+│ F1 Help  F2 Model  F3 Files  F4 Agent  F5 Run  F6 Git  F10 Menu │
+└──────────────────────────────────────────────────────────────────┘
+
+Adapt dimensions dynamically to terminal size.
+
+The interface must remain usable in terminals smaller than 120x40.
+
+============================================================
+6. MENU BAR
+============================================================
+
+Implement a real keyboard-driven menu bar.
+
+Menus:
+
+File
+Edit
+Search
+Agent
+Run
+Git
+Tools
+Help
+
+F10 opens the main menu.
+
+Arrow keys navigate menus.
+
+Enter selects.
+
+Esc closes menu.
+
+Example:
+
+┌─ File ─────────────────┐
+│ New                    │
+│ Open...                │
+│ Save                   │
+│ Save As...             │
+│ ────────────────────── │
+│ Exit                   │
+└────────────────────────┘
+
+============================================================
+7. KEYBOARD SHORTCUTS
+============================================================
+
+Implement:
+
+F1   Help
+F2   Model selector
+F3   Project/files
+F4   Agent panel
+F5   Run
+F6   Git
+F7   Diff
+F8   Tests
+F9   Build
+F10  Menu
+
+Ctrl+S   Save
+Ctrl+F   Find
+Ctrl+L   Clear/refresh current view
+Ctrl+C   Cancel current agent operation where appropriate
+Esc      Close popup/menu
+
+Alt+X    Exit
+
+Do not intercept Ctrl+C if Pi/tool execution requires it; determine appropriate behavior from Pi.
+
+============================================================
+8. PROJECT TREE
+============================================================
+
+Left pane displays the current project.
+
+Show:
+
+- directories
+- files
+- git status where practical
+
+Example:
+
+> PROJECT
+
+  > src
+      main.ts
+      api.ts
+      auth.ts
+
+  > tests
+      auth.test.ts
+
+  package.json
+  README.md
+
+Implement:
+
+- arrow navigation
+- Enter to expand/collapse directories
+- Enter on a file should open it in the appropriate editor/view
+- mouse support if the underlying TUI framework supports it cleanly
+
+Do not spend excessive time implementing a complete IDE editor for the first MVP.
+
+A read-only file preview is acceptable initially.
+
+============================================================
+9. AGENT PANEL
+============================================================
+
+This is the most important part.
+
+The agent panel must display real Pi events.
+
+Do NOT fake agent messages.
+
+Show:
+
+User messages
+
+Agent responses
+
+Tool calls
+
+Tool results
+
+Errors
+
+Thinking/status information where available
+
+Streaming text should appear incrementally if Pi exposes it.
+
+Represent tools using compact DOS-like prefixes:
+
+[READ]
+[EDIT]
+[WRITE]
+[BASH]
+[SEARCH]
+[RUN]
+[TEST]
+[ERROR]
+[OK]
+
+Example:
+
+[READ] src/auth.ts
+[READ] src/session.ts
+
+[EDIT] src/auth.ts
+
+[RUN] npm test
+
+[OK] 14 tests passed
+
+The exact event types must be derived from Pi's current RPC protocol.
+
+============================================================
+10. USER INPUT
+============================================================
+
+Create a bottom input area.
+
+Example:
+
+┌──────────────────────────────────────────────────────────────────┐
+│ > Fix the authentication bug                                      │
+└──────────────────────────────────────────────────────────────────┘
+
+Enter submits the message to Pi.
+
+Up/Down should provide command history where practical.
+
+Ctrl+C should cancel an active request where appropriate.
+
+============================================================
+11. MODEL SELECTOR
+============================================================
+
+F2 opens:
+
+┌─ Model ──────────────────────────┐
+│ GLM-5.3                          │
+│ Qwen                              │
+│ Claude                            │
+│ GPT                               │
+│ Gemini                            │
+│ OpenRouter                        │
+│ Ollama                            │
+└───────────────────────────────────┘
+
+Do NOT hard-code these as actual models.
+
+Populate the selector using Pi's actual available model information if possible.
+
+If Pi exposes model/provider information through RPC, use it.
+
+============================================================
+12. STATUS BAR
+============================================================
+
+Bottom status bar should display useful real information.
+
+Example:
+
+GLM-5.3 | 18.4k tokens | BUILD | main | +2 -1 | 12.3s
+
+Possible fields:
+
+- model
+- provider
+- token usage
+- agent state
+- current git branch
+- git changes
+- elapsed request time
+
+Only show information actually available.
+
+Do not invent values.
+
+============================================================
+13. DIFF VIEW
+============================================================
+
+F7 should open a simple DOS-style diff view.
+
+Example:
+
+┌─ Diff: src/auth.ts ───────────────────────────────────────────────┐
+│ - const token = getToken();                                       │
+│ + const token = await getToken();                                │
+│                                                                  │
+│ - return authenticate(token);                                    │
+│ + return await authenticate(token);                              │
+└──────────────────────────────────────────────────────────────────┘
+
+Use simple +/- notation.
+
+Do not implement a full modern diff editor.
+
+============================================================
+14. HELP
+============================================================
+
+F1 should display:
+
+┌─ TURBO-AI HELP ──────────────────────────────────────────────────┐
+│                                                                  │
+│ F1  Help                                                          │
+│ F2  Select model                                                  │
+│ F3  Project files                                                 │
+│ F4  Agent                                                         │
+│ F5  Run                                                           │
+│ F6  Git                                                           │
+│ F7  Diff                                                          │
+│ F8  Tests                                                         │
+│ F9  Build                                                         │
+│ F10 Menu                                                         │
+│                                                                  │
+│ Ctrl+S  Save                                                      │
+│ Ctrl+F  Find                                                      │
+│ Alt+X   Exit                                                      │
+│                                                                  │
+│ ESC closes the current window.                                   │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+
+============================================================
+15. RETRO DETAILS
+============================================================
+
+Add subtle details that make the interface genuinely feel like Turbo Pascal.
+
+Examples:
+
+Top-left title:
+
+    TURBO-AI
+
+Top-right:
+
+    Agent: Pi
+
+Status line:
+
+    Ln 1, Col 1
+
+Menus should use keyboard mnemonic highlighting where practical.
+
+Use classic DOS terminology where appropriate.
+
+Avoid modern UI wording such as:
+
+"Workspace"
+"Dashboard"
+"Command Palette"
+
+Prefer:
+
+"Project"
+"Menu"
+"Agent"
+"Run"
+"Tools"
+
+============================================================
+16. FONT
+============================================================
+
+Do not bundle copyrighted fonts.
+
+Do not require a special font for the MVP.
+
+The UI must work with the terminal's existing monospace font.
+
+Optionally document recommended fonts such as:
+
+- IBM VGA-style fonts
+- DOSBox-style fonts
+- PxPlus IBM VGA
+
+But do not make them dependencies.
+
+============================================================
+17. WINDOWS COMPATIBILITY
+============================================================
+
+This must run in Windows Terminal and standard modern Windows terminals.
+
+Do not assume Unix-only features.
+
+Handle:
+
+- Ctrl keys
+- function keys
+- terminal resize
+- ANSI escape sequences
+- process spawning
+
+correctly on Windows.
+
+============================================================
+18. ERROR HANDLING
+============================================================
+
+If Pi is not installed:
+
+show:
+
+    ERROR: Pi coding agent not found.
+
+If Pi RPC fails:
+
+    ERROR: Unable to connect to Pi.
+
+If the RPC process terminates:
+
+    PI DISCONNECTED
+
+Provide a clear way to exit/reconnect.
+
+Never silently fail.
+
+============================================================
+19. MVP PRIORITY
+============================================================
+
+Implement in this order:
+
+PHASE 1
+
+1. Start Pi RPC process.
+2. Connect to Pi.
+3. Render Turbo Pascal screen.
+4. Submit user message.
+5. Display streaming agent response.
+6. Display tool events.
+7. Exit cleanly.
+
+PHASE 2
+
+8. Project tree.
+9. F-key navigation.
+10. Menu system.
+11. Model selector.
+12. Status bar.
+
+PHASE 3
+
+13. Git information.
+14. Diff viewer.
+15. File preview.
+16. Help system.
+
+Do not spend hours polishing features before Phase 1 works.
+
+============================================================
+20. TESTING
+============================================================
+
+Create tests for:
+
+- RPC message parsing
+- event handling
+- menu navigation
+- keyboard mapping
+- layout calculations
+
+Also create a simple manual test procedure.
+
+At minimum verify:
+
+1. turbo-ai starts.
+2. Pi starts.
+3. Connection succeeds.
+4. User message reaches Pi.
+5. Pi response appears.
+6. Tool events appear.
+7. Ctrl+C behaves correctly.
+8. F10 opens menu.
+9. F2 opens model selector.
+10. F1 opens help.
+11. terminal resize does not destroy the layout.
+12. Alt+X exits cleanly.
+13. Pi child process is terminated when Turbo-AI exits.
+
+============================================================
+21. PACKAGE SCRIPTS
+============================================================
+
+Provide:
+
+npm install
+
+npm run dev
+
+npm run build
+
+npm start
+
+If appropriate, also:
+
+npm run test
+
+============================================================
+22. README
+============================================================
+
+Write a concise README containing:
+
+- what Turbo-AI is
+- architecture
+- requirements
+- installation
+- usage
+- Pi requirements
+- keyboard shortcuts
+- screenshots or ASCII mockup
+- troubleshooting
+
+Explicitly state that Turbo-AI is inspired by Turbo Pascal/Borland DOS interfaces but is not affiliated with Borland.
+
+============================================================
+23. IMPORTANT DEVELOPMENT RULES
+============================================================
+
+Do not stop after creating a mockup.
+
+Do not claim a feature works unless it actually works.
+
+Do not invent Pi RPC APIs.
+
+Inspect the actual Pi source/examples first.
+
+Do not replace the real Pi agent with fake responses.
+
+Do not implement a fake "demo mode" unless clearly separated from production mode.
+
+Keep the code modular.
+
+Prefer small components.
+
+Use TypeScript types for RPC events.
+
+Run the TypeScript compiler.
+
+Run tests.
+
+Fix all compilation errors.
+
+Actually launch the application if possible.
+
+If something cannot be implemented because the current Pi RPC API does not expose the required information, document the limitation and implement the closest working alternative.
+
+============================================================
+24. FINAL DELIVERABLE
+============================================================
+
+At the end provide:
+
+1. Project path.
+2. Files created.
+3. Installation command.
+4. Run command.
+5. What currently works.
+6. What remains.
+7. Any Pi-version-specific limitations.
+8. Exact commands used to test the project.
+
+Most importantly:
+
+BUILD THE WORKING MVP FIRST.
+
+Do not merely explain how to build it.
+```
