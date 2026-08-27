@@ -1,4 +1,4 @@
-# TURBO-AI v1.01 Beta
+# TURBO-AI Beta
 
 [![Version](https://img.shields.io/badge/version-1.01%20Beta-blue.svg)](https://github.com/earendil-works/pi-mono)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
