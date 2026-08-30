@@ -63,6 +63,22 @@ test("saveCustomModel and readCustomModelsConfig write and read custom models", 
 	}
 });
 
+test("saveCustomModel does not overwrite malformed models.json", () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-models-invalid-"));
+	const originalConfigDir = process.env.PI_CONFIG_DIR;
+	process.env.PI_CONFIG_DIR = tmpDir;
+	try {
+		const filePath = getModelsJsonPath();
+		fs.writeFileSync(filePath, "{ malformed", "utf8");
+		assert.throws(() => saveCustomModel("openrouter", { id: "test-model" }), /malformed models\.json/);
+		assert.equal(fs.readFileSync(filePath, "utf8"), "{ malformed");
+	} finally {
+		if (originalConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+		else process.env.PI_CONFIG_DIR = originalConfigDir;
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test("AddModelDialog supports field navigation, editing and submit", () => {
 	const dialog = new AddModelDialog(80, 24, "openrouter");
 	assert.equal(dialog.currentProvider, "openrouter");

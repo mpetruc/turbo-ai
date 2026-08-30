@@ -12,7 +12,7 @@ export const MAIN_MENUS: Menu[] = [
 			{ label: "Open saved session...", mnemonic: "O", shortcut: "F3", action: "file.open", hint: "Open and load a saved session file" },
 			{ label: "New session", mnemonic: "N", action: "file.new", hint: "Start a new session with the Pi coding agent" },
 			{ label: "Open file preview...", mnemonic: "P", action: "file.preview", hint: "Preview selected file from project explorer" },
-			{ label: "Change directory...", mnemonic: "D", action: "file.chdir", hint: "Change active working directory and reload project" },
+			{ label: "Change directory...", mnemonic: "D", action: "file.chdir", hint: "Reconnect Pi and start a new session in another project directory" },
 			{ label: "Export session to HTML...", mnemonic: "E", action: "file.export", hint: "Export conversation transcript to HTML document" },
 			{ separator: true },
 			{ label: "Exit", mnemonic: "x", shortcut: "Alt+X", action: "app.exit", hint: "Exit Turbo-AI and return to DOS / shell" },
@@ -37,7 +37,7 @@ export const MAIN_MENUS: Menu[] = [
 		hint: "Search and filter files in workspace",
 		items: [
 			{ label: "Find file by name...", mnemonic: "F", shortcut: "Ctrl+F", action: "search.find", hint: "Filter and find files in the project tree" },
-			{ label: "Search text in files...", mnemonic: "T", action: "search.grep", hint: "Grep search text pattern across workspace files via Pi" },
+			{ label: "Search text in files...", mnemonic: "T", action: "search.grep", hint: "Search tracked workspace files with git grep" },
 			{ separator: true },
 			{ label: "Clear search filter", mnemonic: "C", action: "search.clear", hint: "Reset active search filter in project tree" },
 		],
@@ -158,7 +158,7 @@ export class MenuBar {
 				items.push({
 					label: `${num}. ${session}`,
 					mnemonic: String(num),
-					action: `file.recent:${session}`,
+					action: `file.recent:${i}`,
 					hint: `Open recent session: ${session}`,
 				});
 			});

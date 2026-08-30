@@ -2,8 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentPanel } from "../ui/agent-panel.js";
-import { toolTag, toolSummary } from "../rpc/events.js";
+import * as readline from "node:readline";
+import { toolTag, toolSummary, type AgentEntry } from "../rpc/events.js";
 
 /** Read `enabledModels` from Pi's settings.json. Returns null when unavailable/empty. */
 export function readEnabledModels(): string[] | null {
@@ -43,40 +43,65 @@ function exec(cmd: string, args: string[], cwd: string): Promise<string> {
 	});
 }
 
+function parseNumstat(output: string): { added: number; removed: number } {
+	let added = 0;
+	let removed = 0;
+	for (const line of output.split("\n")) {
+		const [a, r] = line.split("\t");
+		if (a && /^\d+$/.test(a)) added += Number.parseInt(a, 10);
+		if (r && /^\d+$/.test(r)) removed += Number.parseInt(r, 10);
+	}
+	return { added, removed };
+}
+
 /** Collect real git information for the status bar / Git menu. Null-safe when not a repo. */
 export async function collectGitInfo(cwd: string): Promise<GitInfo> {
 	const empty: GitInfo = { branch: null, added: null, removed: null, dirtyFiles: [], isRepo: false };
 	try {
-		const status = await exec("git", ["status", "--porcelain", "-b"], cwd);
-		const lines = status.split("\n").filter((l) => l.length > 0);
+		const status = await exec("git", ["status", "--porcelain=v1", "-z", "-b"], cwd);
+		const records = status.split("\0").filter(Boolean);
 		let branch: string | null = null;
 		const dirtyFiles: string[] = [];
-		for (const line of lines) {
-			if (line.startsWith("##")) {
-				const m = /## ([^\s.]+)/.exec(line);
-				branch = m?.[1] ?? null;
+		for (let index = 0; index < records.length; index++) {
+			const record = records[index]!;
+			if (record.startsWith("## ")) {
+				const value = record.slice(3);
+				if (value.startsWith("No commits yet on ")) branch = value.slice("No commits yet on ".length);
+				else if (value.startsWith("Initial commit on ")) branch = value.slice("Initial commit on ".length);
+				else if (value.startsWith("HEAD (no branch)")) branch = "(detached)";
+				else branch = value.split("...")[0] ?? null;
 			} else {
-				dirtyFiles.push(line.slice(3));
+				dirtyFiles.push(record.slice(3));
+				if (record[0] === "R" || record[0] === "C" || record[1] === "R" || record[1] === "C") index++;
 			}
 		}
 		let added: number | null = null;
 		let removed: number | null = null;
 		try {
-			const numstat = await exec("git", ["diff", "--numstat"], cwd);
-			added = 0;
-			removed = 0;
-			for (const l of numstat.split("\n")) {
-				const [a, r] = l.split("\t");
-				if (a && /^\d+$/.test(a)) added += parseInt(a, 10);
-				if (r && /^\d+$/.test(r)) removed += parseInt(r, 10);
-			}
-			if (dirtyFiles.length === 0 && added === 0 && removed === 0) {
+			const numstat = await exec("git", ["diff", "HEAD", "--numstat"], cwd);
+			({ added, removed } = parseNumstat(numstat));
+			if (added === 0 && removed === 0) {
 				added = null;
 				removed = null;
 			}
 		} catch {
-			added = null;
-			removed = null;
+			try {
+				const [staged, unstaged] = await Promise.all([
+					exec("git", ["diff", "--cached", "--numstat"], cwd),
+					exec("git", ["diff", "--numstat"], cwd),
+				]);
+				const stagedStats = parseNumstat(staged);
+				const unstagedStats = parseNumstat(unstaged);
+				added = stagedStats.added + unstagedStats.added;
+				removed = stagedStats.removed + unstagedStats.removed;
+				if (added === 0 && removed === 0) {
+					added = null;
+					removed = null;
+				}
+			} catch {
+				added = null;
+				removed = null;
+			}
 		}
 		return { branch, added, removed, dirtyFiles, isRepo: true };
 	} catch {
@@ -85,7 +110,27 @@ export async function collectGitInfo(cwd: string): Promise<GitInfo> {
 }
 
 export async function gitDiff(cwd: string): Promise<string> {
-	return await exec("git", ["diff", "-U2"], cwd);
+	try {
+		return await exec("git", ["diff", "HEAD", "-U2"], cwd);
+	} catch {
+		return await exec("git", ["diff", "-U2"], cwd);
+	}
+}
+
+export async function gitGrep(cwd: string, query: string): Promise<string[]> {
+	return await new Promise((resolve, reject) => {
+		execFile("git", ["grep", "-n", "-F", "--", query], { cwd, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+			const exitCode = typeof (err as NodeJS.ErrnoException & { code?: number } | null)?.code === "number"
+				? (err as unknown as { code: number }).code
+				: null;
+			if (!err || exitCode === 1) {
+				const lines = stdout.split(/\r?\n/).filter(Boolean);
+				resolve(lines.length > 0 ? lines : ["No matches found."]);
+				return;
+			}
+			reject(new Error(stderr.trim() || err.message));
+		});
+	});
 }
 
 export async function gitBranch(cwd: string): Promise<string | null> {
@@ -220,6 +265,8 @@ export function readEnvKey(cwd: string, envVar: string): string | null {
 
 /** Write/update an API key in local .env and process.env. */
 export function writeEnvKey(cwd: string, envVar: string, value: string): void {
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envVar)) throw new Error(`Invalid environment variable name: ${envVar}`);
+	if (/[\r\n]/.test(value)) throw new Error("API key must be a single line");
 	const localEnv = path.join(cwd, ".env");
 	let content = "";
 	if (fs.existsSync(localEnv)) {
@@ -249,8 +296,23 @@ export function writeEnvKey(cwd: string, envVar: string, value: string): void {
 		newLines.push(`${envVar}=${value}`);
 	}
 
-	fs.writeFileSync(localEnv, newLines.join("\n").trim() + "\n", "utf8");
+	atomicWriteFile(localEnv, newLines.join("\n").trim() + "\n", 0o600);
 	process.env[envVar] = value;
+}
+
+function atomicWriteFile(filePath: string, content: string, mode?: number): void {
+	const dir = path.dirname(filePath);
+	if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+	const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+	try {
+		fs.writeFileSync(tempPath, content, { encoding: "utf8", mode });
+		fs.renameSync(tempPath, filePath);
+	} catch (err) {
+		try {
+			fs.unlinkSync(tempPath);
+		} catch {}
+		throw err;
+	}
 }
 
 /** Format an API key status preview for dialog display. */
@@ -315,7 +377,9 @@ export function saveCustomModel(
 	if (fs.existsSync(filePath)) {
 		try {
 			fullData = JSON.parse(fs.readFileSync(filePath, "utf8"));
-		} catch {}
+		} catch (err: unknown) {
+			throw new Error(`Cannot update malformed models.json: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 	if (!fullData.providers) fullData.providers = {};
 	const p = providerId.toLowerCase().trim();
@@ -351,7 +415,7 @@ export function saveCustomModel(
 	existing.push(model);
 	fullData.providers[p]!.models = existing;
 
-	fs.writeFileSync(filePath, JSON.stringify(fullData, null, 2) + "\n", "utf8");
+	atomicWriteFile(filePath, JSON.stringify(fullData, null, 2) + "\n", 0o600);
 }
 
 export function setCustomModelReasoning(providerId: string, modelId: string, reasoning: boolean): void {
@@ -367,7 +431,7 @@ export function setCustomModelReasoning(providerId: string, modelId: string, rea
 			const m = fullData.providers[p].models.find((item: CustomModelEntry) => item.id.toLowerCase() === modelId.toLowerCase());
 			if (m) {
 				m.reasoning = reasoning;
-				fs.writeFileSync(filePath, JSON.stringify(fullData, null, 2) + "\n", "utf8");
+				atomicWriteFile(filePath, JSON.stringify(fullData, null, 2) + "\n", 0o600);
 				return;
 			}
 		}
@@ -385,136 +449,143 @@ export interface SessionSummary {
 	date: string;
 	path: string;
 	mtime: number;
+	kind: "pi" | "transcript";
 }
 
-export function getProjectSessions(projectCwd: string): SessionSummary[] {
-	const results: SessionSummary[] = [];
-	const normalizedCwd = path.resolve(projectCwd).toLowerCase();
+function normalizePathForComparison(value: string): string {
+	const resolved = path.resolve(value);
+	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
 
-	// 1. Scan Pi's global session repository: ~/.pi/agent/sessions/
-	const sessionsBaseDir = path.join(os.homedir(), ".pi", "agent", "sessions");
-	if (fs.existsSync(sessionsBaseDir)) {
-		try {
-			const subdirs = fs.readdirSync(sessionsBaseDir);
-			for (const dirName of subdirs) {
-				const fullDir = path.join(sessionsBaseDir, dirName);
-				let stat: fs.Stats;
-				try {
-					stat = fs.statSync(fullDir);
-				} catch {
-					continue;
-				}
-				if (!stat.isDirectory()) continue;
-
-				// Read jsonl session files in this directory
-				let files: string[] = [];
-				try {
-					files = fs.readdirSync(fullDir).filter((f) => f.endsWith(".jsonl"));
-				} catch {
-					continue;
-				}
-
-				for (const file of files) {
-					const filePath = path.join(fullDir, file);
-					try {
-						const fileStat = fs.statSync(filePath);
-						const content = fs.readFileSync(filePath, "utf8");
-						const lines = content.split("\n");
-						if (lines.length === 0) continue;
-
-						let sessionCwd = "";
-						let sessionDate = fileStat.mtime.toISOString().slice(0, 16).replace("T", " ");
-						let firstPrompt = "(no prompt)";
-						let modelName: string | undefined = undefined;
-						let customName: string | undefined = undefined;
-
-						for (const l of lines) {
-							if (!l.trim()) continue;
-							try {
-								const obj = JSON.parse(l);
-								if (obj.type === "session") {
-									if (obj.cwd) sessionCwd = String(obj.cwd);
-									if (obj.sessionName) customName = String(obj.sessionName);
-								} else if (obj.type === "set_session_name" && obj.name) {
-									customName = String(obj.name);
-								} else if (obj.type === "model_change" && obj.modelId) {
-									modelName = obj.provider ? `${obj.provider}/${obj.modelId}` : String(obj.modelId);
-								} else if (obj.type === "message" && obj.message?.role === "user" && firstPrompt === "(no prompt)") {
-									const textPart = Array.isArray(obj.message.content)
-										? obj.message.content.find((c: any) => c.type === "text")?.text
-										: typeof obj.message.content === "string" ? obj.message.content : "";
-									if (textPart) {
-										let clean = textPart.replace(/\[PLAN MODE:[^\]]+\]\s*/i, "").trim();
-										if (clean.length > 50) clean = clean.slice(0, 49) + "…";
-										firstPrompt = clean || "(empty prompt)";
-									}
-								} else if (obj.type === "message" && obj.message?.role === "assistant" && !modelName && obj.model) {
-									modelName = obj.provider ? `${obj.provider}/${obj.model}` : String(obj.model);
-								}
-							} catch {}
-						}
-
-						// Check if this session matches current project cwd
-						if (sessionCwd && path.resolve(sessionCwd).toLowerCase() === normalizedCwd) {
-							const title = customName || file.replace(/\.jsonl$/i, "").slice(0, 24);
-							results.push({
-								id: file,
-								title,
-								firstPrompt,
-								model: modelName,
-								date: sessionDate,
-								path: filePath,
-								mtime: fileStat.mtimeMs,
-							});
-						}
-					} catch {}
-				}
-			}
-		} catch {}
-	}
-
-	// 2. Scan saved markdown session files in current working directory
+async function summarizePiSession(filePath: string, projectCwd: string): Promise<SessionSummary | null> {
+	let stat: fs.Stats;
 	try {
-		const cwdFiles = fs.readdirSync(projectCwd);
-		for (const f of cwdFiles) {
-			if (f.endsWith(".md") && (f.startsWith("NONAME") || f.includes("SESSION") || f.includes("TASK") || f.toLowerCase().includes("session"))) {
-				const fullP = path.join(projectCwd, f);
-				try {
-					const s = fs.statSync(fullP);
-					if (s.isFile()) {
-						results.push({
-							id: f,
-							title: f,
-							firstPrompt: "Saved Markdown Session",
-							date: s.mtime.toISOString().slice(0, 16).replace("T", " "),
-							path: fullP,
-							mtime: s.mtimeMs,
-						});
+		stat = await fs.promises.stat(filePath);
+	} catch {
+		return null;
+	}
+	let sessionCwd = "";
+	let firstPrompt = "(no prompt)";
+	let modelName: string | undefined;
+	let customName: string | undefined;
+	try {
+		const lines = readline.createInterface({ input: fs.createReadStream(filePath, { encoding: "utf8" }), crlfDelay: Infinity });
+		for await (const line of lines) {
+			if (!line.trim()) continue;
+			try {
+				const obj = JSON.parse(line) as Record<string, any>;
+				if (obj.type === "session") {
+					if (obj.cwd) sessionCwd = String(obj.cwd);
+					if (obj.sessionName) customName = String(obj.sessionName);
+				} else if (obj.type === "set_session_name" && obj.name) {
+					customName = String(obj.name);
+				} else if (obj.type === "model_change" && obj.modelId) {
+					modelName = obj.provider ? `${obj.provider}/${obj.modelId}` : String(obj.modelId);
+				} else if (obj.type === "message" && obj.message?.role === "user" && firstPrompt === "(no prompt)") {
+					const textPart = Array.isArray(obj.message.content)
+						? obj.message.content.find((c: any) => c.type === "text")?.text
+						: typeof obj.message.content === "string" ? obj.message.content : "";
+					if (textPart) {
+						let clean = String(textPart).replace(/\[PLAN MODE:[^\]]+\]\s*/i, "").trim();
+						if (clean.length > 50) clean = clean.slice(0, 49) + "…";
+						firstPrompt = clean || "(empty prompt)";
 					}
-				} catch {}
-			}
+				} else if (obj.type === "message" && obj.message?.role === "assistant" && !modelName && obj.model) {
+					modelName = obj.provider ? `${obj.provider}/${obj.model}` : String(obj.model);
+				}
+			} catch {}
+		}
+	} catch {
+		return null;
+	}
+	if (!sessionCwd || normalizePathForComparison(sessionCwd) !== normalizePathForComparison(projectCwd)) return null;
+	const file = path.basename(filePath);
+	return {
+		id: file,
+		title: customName || file.replace(/\.jsonl$/i, "").slice(0, 24),
+		firstPrompt,
+		model: modelName,
+		date: stat.mtime.toISOString().slice(0, 16).replace("T", " "),
+		path: filePath,
+		mtime: stat.mtimeMs,
+		kind: "pi",
+	};
+}
+
+async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let next = 0;
+	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+		for (;;) {
+			const index = next++;
+			if (index >= items.length) return;
+			results[index] = await fn(items[index]!);
+		}
+	});
+	await Promise.all(workers);
+	return results;
+}
+
+export async function getProjectSessions(projectCwd: string): Promise<SessionSummary[]> {
+	const results: SessionSummary[] = [];
+	const configDir = process.env.PI_CONFIG_DIR ?? path.join(os.homedir(), ".pi", "agent");
+	const sessionsBaseDir = path.join(configDir, "sessions");
+	const jsonlPaths: string[] = [];
+	try {
+		for (const dirent of await fs.promises.readdir(sessionsBaseDir, { withFileTypes: true })) {
+			if (!dirent.isDirectory()) continue;
+			const fullDir = path.join(sessionsBaseDir, dirent.name);
+			try {
+				for (const file of await fs.promises.readdir(fullDir)) {
+					if (file.endsWith(".jsonl")) jsonlPaths.push(path.join(fullDir, file));
+				}
+			} catch {}
+		}
+	} catch {}
+	const summaries = await mapConcurrent(jsonlPaths, 8, (filePath) => summarizePiSession(filePath, projectCwd));
+	for (const summary of summaries) if (summary) results.push(summary);
+
+	try {
+		for (const f of await fs.promises.readdir(projectCwd)) {
+			if (!f.endsWith(".md") || !(f.startsWith("NONAME") || f.includes("SESSION") || f.includes("TASK") || f.toLowerCase().includes("session"))) continue;
+			const fullPath = path.join(projectCwd, f);
+			try {
+				const stat = await fs.promises.stat(fullPath);
+				if (!stat.isFile()) continue;
+				results.push({
+					id: f,
+					title: f,
+					firstPrompt: "Saved Markdown Transcript",
+					date: stat.mtime.toISOString().slice(0, 16).replace("T", " "),
+					path: fullPath,
+					mtime: stat.mtimeMs,
+					kind: "transcript",
+				});
+			} catch {}
 		}
 	} catch {}
 
-	// Sort by newest first
-	results.sort((a, b) => b.mtime - a.mtime);
-	return results;
+	return results.sort((a, b) => b.mtime - a.mtime);
 }
 
 /**
  * Parses a Pi JSONL session file and populates the AgentPanel with historical conversation entries.
  * Returns metadata such as last used model and thinking level.
  */
-export function loadJsonlSessionToPanel(
-	filePath: string,
-	panel: AgentPanel,
-): { model?: string; thinkingLevel?: string; title?: string } {
-	panel.clear();
-	if (!fs.existsSync(filePath)) return {};
+export interface ParsedSession {
+	entries: AgentEntry[];
+	model?: string;
+	thinkingLevel?: string;
+	title?: string;
+}
+
+export function parseJsonlSession(filePath: string): ParsedSession {
+	if (!fs.existsSync(filePath)) throw new Error(`Session file not found: ${filePath}`);
 
 	let extractedModel: string | undefined = undefined;
 	let extractedThinkingLevel: string | undefined = undefined;
 	let extractedTitle: string | undefined = undefined;
+	const entries: AgentEntry[] = [];
 
 	try {
 		const content = fs.readFileSync(filePath, "utf8");
@@ -552,34 +623,33 @@ export function loadJsonlSessionToPanel(
 							.join("\n");
 					}
 					if (userText) {
-						panel.addUserMessage(userText);
+						entries.push({ kind: "user", text: userText });
 					}
 				} else if (role === "assistant") {
 					if (typeof msgContent === "string") {
-						panel.addEntry({ kind: "agent", text: msgContent });
+						entries.push({ kind: "agent", text: msgContent });
 					} else if (Array.isArray(msgContent)) {
 						for (const part of msgContent) {
 							if (part.type === "thinking" && part.thinking) {
-								panel.addEntry({ kind: "thinking", text: part.thinking });
+								entries.push({ kind: "thinking", text: part.thinking });
 							} else if (part.type === "text" && part.text) {
-								panel.addEntry({ kind: "agent", text: part.text });
+								entries.push({ kind: "agent", text: part.text });
 							} else if (part.type === "tool_call" || part.type === "tool_use" || part.name) {
 								const tName = part.name ?? part.toolName ?? "tool";
 								const summary = toolSummary(tName, part.arguments ?? part.input ?? {});
-								panel.addEntry({ kind: "tool", tag: summary.tag, text: summary.text });
+								entries.push({ kind: "tool", tag: summary.tag, text: summary.text });
 							}
 						}
 					}
 				}
 			} else if (obj.type === "tool_execution_start") {
 				const summary = toolSummary(obj.toolName ?? "tool", obj.args);
-				panel.addEntry({ kind: "tool", tag: summary.tag, text: summary.text });
+				entries.push({ kind: "tool", tag: summary.tag, text: summary.text });
 			}
 		}
-	} catch (err: any) {
-		panel.addEntry({ kind: "error", text: `Error loading session: ${err.message}` });
+	} catch (err: unknown) {
+		throw new Error(`Error loading session: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
-	panel.scrollToBottom();
-	return { model: extractedModel, thinkingLevel: extractedThinkingLevel, title: extractedTitle };
+	return { entries, model: extractedModel, thinkingLevel: extractedThinkingLevel, title: extractedTitle };
 }

@@ -299,6 +299,7 @@ export class Terminal {
 	private mouseHandler?: (mouse: MouseEvent) => void;
 	private resizeHandler?: () => void;
 	private dataListener?: (chunk: Buffer) => void;
+	private resizeListener?: () => void;
 	private inputBuffer = "";
 	private escTimer: NodeJS.Timeout | null = null;
 
@@ -335,7 +336,8 @@ export class Terminal {
 		};
 
 		process.stdin.on("data", this.dataListener);
-		process.stdout.on("resize", () => this.resizeHandler?.());
+		this.resizeListener = () => this.resizeHandler?.();
+		process.stdout.on("resize", this.resizeListener);
 	}
 
 	leave(): void {
@@ -353,6 +355,11 @@ export class Terminal {
 
 		if (this.dataListener) {
 			process.stdin.removeListener("data", this.dataListener);
+			this.dataListener = undefined;
+		}
+		if (this.resizeListener) {
+			process.stdout.removeListener("resize", this.resizeListener);
+			this.resizeListener = undefined;
 		}
 
 		try {

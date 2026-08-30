@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRpcLine } from "../src/rpc/types.js";
+import { parseRpcLine, parseThinkingLevel } from "../src/rpc/types.js";
 
 test("parseRpcLine parses responses", () => {
 	const r = parseRpcLine('{"type":"response","command":"prompt","success":true,"id":"req-1"}');
@@ -48,4 +48,10 @@ test("parseRpcLine rejects garbage", () => {
 test("parseRpcLine tolerates trailing CR", () => {
 	const r = parseRpcLine('{"type":"agent_start"}\r');
 	assert.ok(r);
+});
+
+test("parseThinkingLevel accepts only protocol values", () => {
+	assert.equal(parseThinkingLevel(" HIGH "), "high");
+	assert.equal(parseThinkingLevel("xhigh"), "xhigh");
+	assert.equal(parseThinkingLevel("maximum"), null);
 });

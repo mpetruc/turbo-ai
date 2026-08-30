@@ -11,6 +11,7 @@ export class SessionSelector {
 	index = 0;
 	rect: Rect;
 	title = "Resume Session";
+	private message: string | null = null;
 
 	constructor(cols: number, rows: number) {
 		const w = Math.min(76, Math.max(50, cols - 4));
@@ -21,6 +22,17 @@ export class SessionSelector {
 	setSessions(sessions: SessionSummary[]): void {
 		this.items = sessions;
 		this.index = 0;
+		this.message = null;
+	}
+
+	setLoading(): void {
+		this.items = [];
+		this.message = "Searching project sessions...";
+	}
+
+	setError(message: string): void {
+		this.items = [];
+		this.message = message;
 	}
 
 	get sessions(): SessionSummary[] {
@@ -115,7 +127,8 @@ export class SessionSelector {
 		const visibleRows = Math.max(1, a.h - 3);
 
 		if (this.items.length === 0) {
-			screen.text(a.x + 2, listY + 1, "(No previous sessions found for this project)", dimAttr);
+			const message = this.message ?? "No previous sessions found for this project";
+			screen.textClipped(a.x + 2, listY + 1, `(${message})`, Math.max(0, a.w - 4), dimAttr);
 			return;
 		}
 

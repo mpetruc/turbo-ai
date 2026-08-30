@@ -8,7 +8,7 @@ export class PromptDialog {
 	cursorPos: number;
 	rect: Rect;
 
-	constructor(cols: number, rows: number, readonly title: string, prefill = "") {
+	constructor(cols: number, rows: number, readonly title: string, prefill = "", readonly secret = false) {
 		const w = Math.min(60, Math.max(38, cols - 6));
 		const h = 8;
 		this.rect = centerRect(cols, rows, w, h);
@@ -84,7 +84,8 @@ export class PromptDialog {
 			scrollOffset = this.cursorPos - inputW + 1;
 		}
 
-		const visible = this.value.slice(scrollOffset, scrollOffset + inputW);
+		const displayValue = this.secret ? "*".repeat(this.value.length) : this.value;
+		const visible = displayValue.slice(scrollOffset, scrollOffset + inputW);
 		screen.textClipped(inputX, inputY, visible, inputW, inputBgAttr);
 
 		// Buttons: OK (with yellow 'K') and Cancel (green bg, black text)

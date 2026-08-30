@@ -54,6 +54,16 @@ test("readEnvKey and writeEnvKey create and update .env file", () => {
 	}
 });
 
+test("writeEnvKey rejects multiline values", () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-env-invalid-"));
+	try {
+		assert.throws(() => writeEnvKey(tmpDir, "SAFE_KEY", "first\nINJECTED=value"), /single line/);
+		assert.equal(fs.existsSync(path.join(tmpDir, ".env")), false);
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test("ProviderDialog lists known providers and supports navigation", () => {
 	const dialog = new ProviderDialog(100, 30, process.cwd());
 	assert.ok(dialog.providers.length >= 8);

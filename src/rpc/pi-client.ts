@@ -2,9 +2,23 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { parseRpcLine, type RpcCommand, type RpcEvent, type RpcResponse } from "./types.js";
 
+function windowsCmdLine(command: string, args: string[]): string {
+	const values = [command, ...args];
+	for (const value of values) {
+		if (/["\r\n&|<>^%!]/.test(value)) {
+			throw new Error(`Unsafe character in Windows command argument: ${value}`);
+		}
+	}
+	const quotedArgs = args.map((value) => `"${value}"`).join(" ");
+	const suffix = quotedArgs ? ` ${quotedArgs}` : "";
+	return /\s/.test(command) ? `""${command}"${suffix}"` : `${command}${suffix}`;
+}
+
 export interface PiClientOptions {
 	/** Command used to launch pi. Defaults to "pi" (resolved via PATH). */
 	command?: string;
+	/** Override RPC launch arguments, primarily for compatible wrappers and tests. */
+	args?: string[];
 	cwd?: string;
 }
 
@@ -22,6 +36,8 @@ export class PiClient extends EventEmitter {
 	private nextId = 1;
 	private pending = new Map<string, (r: RpcResponse) => void>();
 	private exited = false;
+	private disposing = false;
+	private disconnectedEmitted = false;
 	readonly options: PiClientOptions;
 
 	constructor(options: PiClientOptions = {}) {
@@ -35,16 +51,29 @@ export class PiClient extends EventEmitter {
 
 	start(): Promise<void> {
 		const command = this.options.command ?? process.env.PI_CMD ?? "pi";
-		const args = ["--mode", "rpc", "--no-session"];
+		const args = this.options.args ?? ["--mode", "rpc", "--no-session"];
+		const needsWindowsShell = process.platform === "win32"
+			&& (command.toLowerCase() === "pi" || /\.(cmd|bat)$/i.test(command));
+		let spawnCommand = command;
+		let spawnArgs = args;
+		if (needsWindowsShell) {
+			spawnCommand = process.env.ComSpec ?? "cmd.exe";
+			spawnArgs = ["/d", "/s", "/c", windowsCmdLine(command, args)];
+		}
+		this.exited = false;
+		this.disposing = false;
+		this.disconnectedEmitted = false;
+		this.buffer = "";
+		this.stderrText = "";
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			let proc: ChildProcess;
 			try {
-				proc = spawn(command, args, {
+				proc = spawn(spawnCommand, spawnArgs, {
 					cwd: this.options.cwd ?? process.cwd(),
 					stdio: ["pipe", "pipe", "pipe"],
-					// On Windows `pi` is a .cmd shim; shell resolves it via PATH.
-					shell: process.platform === "win32",
+					shell: false,
+					windowsVerbatimArguments: needsWindowsShell,
 					windowsHide: true,
 				});
 			} catch (err) {
@@ -54,11 +83,13 @@ export class PiClient extends EventEmitter {
 			this.proc = proc;
 
 			proc.on("error", () => {
+				clearTimeout(startupTimer);
 				if (!settled) {
 					settled = true;
 					reject(new Error("ERROR: Pi coding agent not found."));
 				}
-				this.emit("disconnected");
+				this.failPending("PI DISCONNECTED");
+				this.emitDisconnected();
 			});
 
 			// Give the process a moment; if it dies immediately report stderr.
@@ -72,11 +103,8 @@ export class PiClient extends EventEmitter {
 			proc.once("exit", (code) => {
 				this.exited = true;
 				clearTimeout(startupTimer);
-				for (const [id, cb] of this.pending) {
-					cb({ type: "response", command: "exit", success: false, id, error: "PI DISCONNECTED" });
-					this.pending.delete(id);
-				}
-				this.emit("disconnected", code);
+				this.failPending(this.disposing ? "PI DISPOSED" : "PI DISCONNECTED");
+				if (!this.disposing) this.emitDisconnected(code);
 				if (!settled) {
 					settled = true;
 					const stderr = this.stderrText.trim();
@@ -157,23 +185,60 @@ export class PiClient extends EventEmitter {
 		});
 	}
 
-	dispose(): void {
+	private failPending(error: string): void {
+		for (const [id, cb] of this.pending) {
+			cb({ type: "response", command: "exit", success: false, id, error });
+		}
+		this.pending.clear();
+	}
+
+	private emitDisconnected(code?: number | null): void {
+		if (this.disconnectedEmitted) return;
+		this.disconnectedEmitted = true;
+		this.emit("disconnected", code);
+	}
+
+	dispose(): Promise<void> {
+		this.disposing = true;
+		this.failPending("PI DISPOSED");
+		let waitForExit = Promise.resolve();
 		if (this.proc && !this.exited) {
+			const p = this.proc;
+			waitForExit = new Promise<void>((resolve) => {
+				let settled = false;
+				const done = (): void => {
+					if (settled) return;
+					settled = true;
+					resolve();
+				};
+				p.once("close", done);
+				setTimeout(done, 3000).unref();
+			});
 			try {
 				this.proc.kill();
 			} catch {
 				/* already gone */
 			}
 			// Windows .cmd shims sometimes leave the child attached; force after grace period.
-			const p = this.proc;
-			setTimeout(() => {
+			const forceTimer = setTimeout(() => {
 				try {
-					if (p.exitCode === null) p.kill("SIGKILL");
+					if (p.exitCode !== null || !p.pid) return;
+					if (process.platform === "win32") {
+						spawn("taskkill", ["/PID", String(p.pid), "/T", "/F"], {
+							windowsHide: true,
+							stdio: "ignore",
+						});
+					} else {
+						p.kill("SIGKILL");
+					}
 				} catch {
 					/* gone */
 				}
 			}, 2000);
+			forceTimer.unref();
 		}
+		this.exited = true;
 		this.proc = null;
+		return waitForExit;
 	}
 }

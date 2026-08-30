@@ -50,6 +50,14 @@ export interface SessionStatsData {
 	} | null;
 }
 
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export function parseThinkingLevel(value: string): ThinkingLevel | null {
+	const normalized = value.trim().toLowerCase();
+	return THINKING_LEVELS.includes(normalized as ThinkingLevel) ? normalized as ThinkingLevel : null;
+}
+
 export interface TextContent {
 	type: "text";
 	text: string;
@@ -155,7 +163,7 @@ export type RpcCommand =
 	| { type: "set_model"; provider: string; modelId: string; model?: string; id?: string }
 	| { type: "cycle_model"; id?: string }
 	| { type: "get_available_models"; id?: string }
-	| { type: "set_thinking_level"; level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"; id?: string }
+	| { type: "set_thinking_level"; level: ThinkingLevel; id?: string }
 	| { type: "cycle_thinking_level"; id?: string }
 	| { type: "compact"; customInstructions?: string; id?: string }
 	| { type: "set_auto_compaction"; enabled: boolean; id?: string }

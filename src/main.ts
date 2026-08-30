@@ -1,10 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { packAttr, THEME } from "./theme/turbo-pascal.js";
 import { centerRect, inner, computeLayout, isInRect, type Layout } from "./utils/layout.js";
 import { PiClient } from "./rpc/pi-client.js";
 import { eventToEntries, type AgentEntry } from "./rpc/events.js";
-import { parseRpcLine, type ModelInfo, type RpcCommand, type RpcEvent, type RpcResponse, type SessionStateData, type SessionStatsData } from "./rpc/types.js";
+import { parseThinkingLevel, type ModelInfo, type RpcEvent, type RpcResponse, type SessionStateData, type SessionStatsData, type ThinkingLevel } from "./rpc/types.js";
 import { Screen } from "./ui/screen.js";
 import { MenuBar, MAIN_MENUS, renderDropdown } from "./ui/menu-bar.js";
 import { MenuState, menuWidth, menuHeight } from "./ui/menu.js";
@@ -18,11 +19,12 @@ import { renderHelp, AboutDialog, helpRect, ABOUT_TEXT } from "./ui/help.js";
 import { TextPopup } from "./ui/text-popup.js";
 import { PromptDialog } from "./ui/prompt-dialog.js";
 import { mapKey, type AppAction } from "./utils/keys.js";
+import { CLI_USAGE, parseCliArgs } from "./utils/cli.js";
 import { Terminal, type KeyEvent, type MouseEvent } from "./utils/terminal.js";
 import { ProviderDialog, type ProviderEntry } from "./ui/provider-dialog.js";
 import { AddModelDialog, type AddModelResult } from "./ui/add-model-dialog.js";
 import { SessionSelector } from "./ui/session-selector.js";
-import { collectGitInfo, copyToClipboard, filterEnabledModels, gitDiff, gitLog, getSystemInfo, readPreview, readEnvKey, writeEnvKey, saveCustomModel, setCustomModelReasoning, getProjectSessions, loadJsonlSessionToPanel, type GitInfo, type SessionSummary } from "./commands/commands.js";
+import { collectGitInfo, copyToClipboard, filterEnabledModels, gitDiff, gitGrep, gitLog, getSystemInfo, readPreview, readEnvKey, writeEnvKey, saveCustomModel, setCustomModelReasoning, getProjectSessions, parseJsonlSession, type GitInfo } from "./commands/commands.js";
 
 type Overlay =
 	| { kind: "menu"; state: MenuState; x: number; y: number }
@@ -39,7 +41,13 @@ type Overlay =
 
 export type WindowFocus = "input" | "agent" | "tree";
 
-class App {
+interface RecentSession {
+	label: string;
+	path: string;
+	kind: "pi" | "transcript";
+}
+
+export class App {
 	private screen = new Screen();
 	private term = new Terminal();
 	private client: PiClient;
@@ -49,8 +57,8 @@ class App {
 	private input = new InputLine();
 	private overlay: Overlay = null;
 
-	constructor(public cwd: string) {
-		this.client = new PiClient({ cwd });
+	constructor(public cwd: string, private readonly clientFactory: (cwd: string) => PiClient = (dir) => new PiClient({ cwd: dir })) {
+		this.client = this.clientFactory(cwd);
 		this.tree = new ProjectTree(cwd);
 	}
 
@@ -71,6 +79,8 @@ class App {
 	private sessionCounter = 0;
 	private zoomedWindow: "tree" | "agent" | null = null;
 	private spinnerTimer: NodeJS.Timeout | null = null;
+	private activityTimer: NodeJS.Timeout | null = null;
+	private gitPollTimer: NodeJS.Timeout | null = null;
 	private spinnerFrame = 0;
 	private static SPINNER_FRAMES = ["|", "/", "-", "\\"];
 
@@ -93,13 +103,25 @@ class App {
 	private activeSelection: { kind: "agent" | "input" | "text" | "diff" } | null = null;
 	private planMode = false;
 	private thinkingLevel: string | null = null;
-	private recentSessions: string[] = [];
+	private recentSessions: RecentSession[] = [];
+	private readonly clientEventHandler = (evt: RpcEvent): void => this.onRpcEvent(evt);
+	private readonly clientResponseHandler = (resp: RpcResponse): void => this.onRpcResponse(resp);
+	private readonly clientDisconnectedHandler = (): void => this.onDisconnected();
+	private readonly processExitHandler = (): void => this.cleanup();
+	private readonly sigintHandler = (): void => {
+		this.cleanup();
+		process.exit(130);
+	};
+	private readonly sigtermHandler = (): void => {
+		this.cleanup();
+		process.exit(143);
+	};
 
-	private addRecentSession(name: string): void {
-		if (!name || !name.trim()) return;
-		const clean = name.trim();
-		this.recentSessions = [clean, ...this.recentSessions.filter((s) => s.toLowerCase() !== clean.toLowerCase())].slice(0, 9);
-		this.menuBar.setRecentSessions(this.recentSessions);
+	private addRecentSession(session: RecentSession): void {
+		if (!session.label.trim() || !session.path.trim()) return;
+		const normalizedPath = path.resolve(session.path).toLowerCase();
+		this.recentSessions = [session, ...this.recentSessions.filter((s) => path.resolve(s.path).toLowerCase() !== normalizedPath)].slice(0, 9);
+		this.menuBar.setRecentSessions(this.recentSessions.map((s) => s.label));
 	}
 
 	private startSpinner(): void {
@@ -131,25 +153,9 @@ class App {
 		this.refreshSize();
 		this.tree.reload();
 
-		this.client.on("event", (evt: RpcEvent) => this.onRpcEvent(evt));
-		this.client.on("response", (resp: RpcResponse) => {
-			if (!resp.success) {
-				const errMsg = resp.error ?? "Command failed";
-				this.panel.addEntry({ kind: "error", text: `${resp.command || "RPC"}: ${errMsg}`, tag: "[ERROR]", isError: true });
-				this.flash(`Error: ${errMsg}`);
-				this.isStreaming = false;
-				this.requestStart = null;
-				this.stopSpinner();
-				this.markDirty();
-			}
-		});
-		this.client.on("disconnected", () => this.onDisconnected());
+		this.bindClient(this.client);
 
-		let stateResp = await this.client.request<SessionStateData>({ type: "get_state" });
-		for (let attempt = 0; attempt < 3 && !stateResp.success; attempt++) {
-			await new Promise((r) => setTimeout(r, 500));
-			stateResp = await this.client.request<SessionStateData>({ type: "get_state" });
-		}
+		const stateResp = await this.getClientState(this.client);
 		if (!stateResp.success || !stateResp.data) {
 			this.fatal("ERROR: Unable to connect to Pi.");
 			return;
@@ -159,21 +165,21 @@ class App {
 		if (stateResp.data.thinkingLevel) this.thinkingLevel = stateResp.data.thinkingLevel;
 		const initSession = this.getEffectiveSessionName();
 		this.panel.setStatus(`Connected (${initSession}). Session: ${stateResp.data.sessionId ?? "(new)"}`);
-		this.addRecentSession(initSession);
 
 		void this.pollStats();
 		void this.pollGit();
-		setInterval(() => {
+		this.activityTimer = setInterval(() => {
 			if (!this.closed && (this.isStreaming || this.isBash)) this.markDirty();
 		}, 100);
-		setInterval(() => {
+		this.gitPollTimer = setInterval(() => {
 			if (!this.closed) void this.pollGit();
 		}, 10000);
 
 		this.term.onKey((key) => this.onKey(key));
 		this.term.onMouse((mouse) => this.onMouse(mouse));
-		process.on("exit", () => this.cleanup());
-		process.on("SIGINT", () => this.cleanup());
+		process.on("exit", this.processExitHandler);
+		process.on("SIGINT", this.sigintHandler);
+		process.on("SIGTERM", this.sigtermHandler);
 
 		this.loop();
 	}
@@ -344,6 +350,7 @@ class App {
 			this.statusMessage = null;
 			this.markDirty();
 		}, 3000);
+		this.statusMessageTimer.unref();
 		this.markDirty();
 	}
 
@@ -396,6 +403,38 @@ class App {
 		if (res.entries.length > 0) this.markDirty();
 	}
 
+	private onRpcResponse(resp: RpcResponse): void {
+		if (resp.success) return;
+		const errMsg = resp.error ?? "Command failed";
+		this.panel.addEntry({ kind: "error", text: `${resp.command || "RPC"}: ${errMsg}`, tag: "[ERROR]", isError: true });
+		this.flash(`Error: ${errMsg}`);
+		this.isStreaming = false;
+		this.requestStart = null;
+		this.stopSpinner();
+		this.markDirty();
+	}
+
+	private bindClient(client: PiClient): void {
+		client.on("event", this.clientEventHandler);
+		client.on("response", this.clientResponseHandler);
+		client.on("disconnected", this.clientDisconnectedHandler);
+	}
+
+	private async getClientState(client: PiClient): Promise<RpcResponse & { data?: SessionStateData }> {
+		let response = await client.request<SessionStateData>({ type: "get_state" });
+		for (let attempt = 0; attempt < 3 && !response.success; attempt++) {
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			response = await client.request<SessionStateData>({ type: "get_state" });
+		}
+		return response;
+	}
+
+	private unbindClient(client: PiClient): void {
+		client.off("event", this.clientEventHandler);
+		client.off("response", this.clientResponseHandler);
+		client.off("disconnected", this.clientDisconnectedHandler);
+	}
+
 	private onDisconnected(): void {
 		if (this.closed) return;
 		this.isStreaming = false;
@@ -416,7 +455,9 @@ class App {
 	}
 
 	private async pollGit(): Promise<void> {
-		const info = await collectGitInfo(this.cwd);
+		const polledCwd = this.cwd;
+		const info = await collectGitInfo(polledCwd);
+		if (polledCwd !== this.cwd) return;
 		this.gitInfo = info;
 		if (info.isRepo) this.tree.setGitStatus(info.dirtyFiles);
 		this.markDirty();
@@ -1750,9 +1791,9 @@ class App {
 		this.menuBar.openIndex = null;
 	}
 
-	private openPrompt(title: string, prefill: string, onSubmit: (value: string) => void): void {
+	private openPrompt(title: string, prefill: string, onSubmit: (value: string) => void, options?: { secret?: boolean }): void {
 		const { cols, rows } = this.term.size();
-		this.overlay = { kind: "prompt", dialog: new PromptDialog(cols, rows, title, prefill), onSubmit };
+		this.overlay = { kind: "prompt", dialog: new PromptDialog(cols, rows, title, prefill, options?.secret ?? false), onSubmit };
 	}
 
 	private openMenuAt(index: number): void {
@@ -1770,8 +1811,9 @@ class App {
 
 	private dispatchCommand(command: string): void {
 		if (command.startsWith("file.recent:")) {
-			const name = command.slice("file.recent:".length);
-			this.loadRecentSession(name);
+			const index = Number.parseInt(command.slice("file.recent:".length), 10);
+			const session = this.recentSessions[index];
+			if (session) void this.loadRecentSession(session.path);
 			return;
 		}
 
@@ -2022,17 +2064,23 @@ class App {
 				if (!arg) {
 					void this.cycleThinkingLevel();
 				} else {
-					const level = arg.toLowerCase() as any;
+					const level = parseThinkingLevel(arg);
+					if (!level) {
+						this.flash("Invalid effort. Use: off, minimal, low, medium, high, xhigh");
+						this.panel.addEntry({ kind: "error", text: `Invalid thinking effort: ${arg}`, tag: "[ERROR]", isError: true });
+						return true;
+					}
 					const setResp = await this.client.request({
 						type: "set_thinking_level",
 						level,
-					} as unknown as RpcCommand);
-					if (this.model && this.model.includes("/")) {
-						const slash = this.model.indexOf("/");
-						const p = this.model.slice(0, slash);
-						const m = this.model.slice(slash + 1);
-						setCustomModelReasoning(p, m, level !== "off");
+					});
+					if (!setResp.success) {
+						const message = setResp.error ?? "Failed to set thinking effort";
+						this.flash(message);
+						this.panel.addEntry({ kind: "error", text: message, tag: "[ERROR]", isError: true });
+						return true;
 					}
+					this.syncCustomModelReasoning(level !== "off");
 					this.thinkingLevel = level === "off" ? null : level;
 					this.flash(`Thinking effort: ${level}`);
 					this.panel.addEntry({ kind: "info", text: `Thinking effort set to: ${level}` });
@@ -2099,7 +2147,7 @@ class App {
 					try {
 						fs.writeFileSync(target, content, "utf8");
 						const base = path.basename(target);
-						this.addRecentSession(base);
+						this.addRecentSession({ label: base, path: target, kind: "transcript" });
 						this.flash(`Session saved to ${base}`);
 						this.panel.addEntry({ kind: "info", text: `Session saved: ${target}` });
 					} catch (err: any) {
@@ -2120,7 +2168,7 @@ class App {
 					if (!isNaN(num) && num >= 1 && num <= this.recentSessions.length) {
 						const targetSession = this.recentSessions[num - 1];
 						if (targetSession) {
-							void this.loadRecentSession(targetSession);
+							void this.loadRecentSession(targetSession.path);
 							return true;
 						}
 					}
@@ -2139,7 +2187,7 @@ class App {
 					if (!isNaN(num) && num >= 1 && num <= this.recentSessions.length) {
 						const targetSession = this.recentSessions[num - 1];
 						if (targetSession) {
-							void this.loadRecentSession(targetSession);
+							void this.loadRecentSession(targetSession.path);
 							return true;
 						}
 					}
@@ -2220,7 +2268,7 @@ class App {
 			try {
 				fs.writeFileSync(target, content, "utf8");
 				const base = path.basename(target);
-				this.addRecentSession(base);
+				this.addRecentSession({ label: base, path: target, kind: "transcript" });
 				this.flash(`Session saved to ${base}`);
 				this.panel.addEntry({ kind: "info", text: `Session saved: ${target}` });
 			} catch (err: any) {
@@ -2233,10 +2281,21 @@ class App {
 	private openSessionSelector(): void {
 		const { cols, rows } = this.term.size();
 		const selector = new SessionSelector(cols, rows);
-		const sessions = getProjectSessions(this.cwd);
-		selector.setSessions(sessions);
+		selector.setLoading();
 		this.overlay = { kind: "session", selector };
 		this.markDirty();
+		void getProjectSessions(this.cwd).then(
+			(sessions) => {
+				if (this.overlay?.kind !== "session" || this.overlay.selector !== selector) return;
+				selector.setSessions(sessions);
+				this.markDirty();
+			},
+			(err: unknown) => {
+				if (this.overlay?.kind !== "session" || this.overlay.selector !== selector) return;
+				selector.setError(err instanceof Error ? err.message : String(err));
+				this.markDirty();
+			},
+		);
 	}
 
 	private openSavedSession(): void {
@@ -2246,15 +2305,23 @@ class App {
 	private async loadRecentSession(name: string): Promise<void> {
 		const target = path.resolve(this.cwd, name);
 		if (target.endsWith(".jsonl") && fs.existsSync(target)) {
-			const meta = loadJsonlSessionToPanel(target, this.panel);
-			if (meta.model) this.model = meta.model;
-			if (meta.thinkingLevel) this.thinkingLevel = meta.thinkingLevel === "off" ? null : meta.thinkingLevel;
-
+			let parsed;
+			try {
+				parsed = parseJsonlSession(target);
+			} catch (err: unknown) {
+				this.flash(err instanceof Error ? err.message : String(err));
+				return;
+			}
 			const resp = await this.client.request({ type: "switch_session", sessionPath: target });
 			if (resp.success) {
-				const base = meta.title || path.basename(target).toUpperCase();
+				this.panel.clear();
+				for (const entry of parsed.entries) this.panel.addEntry(entry);
+				this.panel.scrollToBottom();
+				if (parsed.model) this.model = parsed.model;
+				if (parsed.thinkingLevel) this.thinkingLevel = parsed.thinkingLevel === "off" ? null : parsed.thinkingLevel;
+				const base = parsed.title || path.basename(target).toUpperCase();
 				this.sessionName = base;
-				this.addRecentSession(base);
+				this.addRecentSession({ label: base, path: target, kind: "pi" });
 				this.flash(`Session resumed: ${base}`);
 				void this.pollStats();
 			} else {
@@ -2266,23 +2333,19 @@ class App {
 
 		if (fs.existsSync(target) && fs.statSync(target).isFile()) {
 			try {
-				const content = fs.readFileSync(target, "utf8");
-				this.panel.clear();
-				const base = path.basename(target).toUpperCase();
-				this.sessionName = base;
-				this.addRecentSession(base);
-				this.panel.addEntry({ kind: "info", text: `Loaded session: ${base}` });
-				this.panel.addEntry({ kind: "agent", text: content });
-				this.panel.scrollToBottom();
-				this.flash(`Session loaded: ${base}`);
-			} catch (err: any) {
-				this.flash(`Load failed: ${err.message}`);
+				const preview = readPreview(target, 5000);
+				if (!preview) throw new Error("Transcript is too large or unreadable");
+				const base = path.basename(target);
+				const { cols, rows } = this.term.size();
+				const lines = preview.truncated ? [...preview.lines, "... (truncated)"] : preview.lines;
+				this.overlay = { kind: "text", popup: new TextPopup(cols, rows, `Transcript: ${base}`, lines) };
+				this.addRecentSession({ label: base, path: target, kind: "transcript" });
+				this.flash(`Transcript opened: ${base}`);
+			} catch (err: unknown) {
+				this.flash(`Load failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		} else {
-			this.sessionName = name.toUpperCase();
-			this.addRecentSession(name);
-			this.flash(`Switched to session: ${name}`);
-			this.panel.addEntry({ kind: "info", text: `Switched to session: ${name}` });
+			this.flash(`Session not found: ${name}`);
 		}
 		this.markDirty();
 	}
@@ -2326,7 +2389,6 @@ class App {
 			this.panel.clear();
 			const sessName = this.getEffectiveSessionName();
 			this.panel.setStatus(`New session started (${sessName}).`);
-			this.addRecentSession(sessName);
 			void this.pollStats();
 		} else {
 			this.flash(resp.error ?? "Failed to start new session");
@@ -2365,14 +2427,16 @@ class App {
 		if (!provider) return;
 		const curVal = readEnvKey(this.cwd, provider.envVar) ?? "";
 		this.openPrompt(`Set ${provider.name} API Key`, curVal, (newKey) => {
-			if (newKey !== null && newKey !== undefined) {
+			try {
 				writeEnvKey(this.cwd, provider.envVar, newKey.trim());
 				this.modelsCache = null;
 				this.flash(`Saved ${provider.envVar}. Models updated.`);
 				this.panel.addEntry({ kind: "info", text: `Updated ${provider.envVar} in .env` });
+			} catch (err: unknown) {
+				this.flash(`Failed to save key: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			this.openProviderDialog();
-		});
+		}, { secret: true });
 	}
 
 	private openAddModelDialog(initialProvider = "openrouter"): void {
@@ -2445,7 +2509,7 @@ class App {
 			provider: m.provider,
 			modelId: m.id,
 			model: m.id,
-		} as unknown as RpcCommand);
+		});
 		this.flash(resp.success ? `Model: ${m.provider}/${m.id}` : `Set model failed: ${resp.error ?? "?"}`);
 		if (resp.success) {
 			this.model = `${m.provider}/${m.id}`;
@@ -2541,17 +2605,63 @@ class App {
 
 	private changeDirectory(): void {
 		this.openPrompt("Change Directory", this.cwd, (newDir) => {
-			const target = path.resolve(this.cwd, newDir.trim());
-			if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
-				this.flash(`Invalid directory: ${target}`);
-				return;
-			}
-			this.cwd = target;
-			this.tree.setBaseDir(this.cwd);
-			void this.pollGit();
-			this.flash(`Working directory: ${this.cwd}`);
-			this.markDirty();
+			void this.switchWorkingDirectory(newDir);
 		});
+	}
+
+	private async switchWorkingDirectory(newDir: string): Promise<void> {
+		if (this.isStreaming || this.isBash) {
+			this.flash("Finish or abort the active operation before changing directory");
+			return;
+		}
+		const target = path.resolve(this.cwd, newDir.trim());
+		try {
+			if (!fs.statSync(target).isDirectory()) throw new Error("not a directory");
+		} catch {
+			this.flash(`Invalid directory: ${target}`);
+			return;
+		}
+		if (path.resolve(this.cwd) === target) {
+			this.flash(`Already using: ${target}`);
+			return;
+		}
+
+		this.flash(`Connecting Pi in ${target}...`);
+		const candidate = this.clientFactory(target);
+		try {
+			await candidate.start();
+			const state = await this.getClientState(candidate);
+			if (!state.success || !state.data) throw new Error(state.error ?? "Unable to initialize Pi in the selected directory");
+
+			const previous = this.client;
+			this.unbindClient(previous);
+			this.client = candidate;
+			this.bindClient(candidate);
+			previous.dispose();
+
+			this.cwd = target;
+			this.tree.setBaseDir(target);
+			this.panel.clear();
+			this.model = state.data.model ? `${state.data.model.provider}/${state.data.model.id}` : null;
+			this.thinkingLevel = state.data.thinkingLevel === "off" ? null : state.data.thinkingLevel ?? null;
+			this.sessionName = state.data.sessionName ?? null;
+			this.contextTokens = null;
+			this.modelsCache = null;
+			this.recentSessions = [];
+			this.menuBar.setRecentSessions([]);
+			this.isStreaming = false;
+			this.isBash = false;
+			this.requestStart = null;
+			this.panel.setStatus(`Connected in ${target}. Session: ${state.data.sessionId ?? "(new)"}`);
+			await Promise.all([this.pollStats(), this.pollGit()]);
+			this.flash(`Working directory: ${target}`);
+		} catch (err: unknown) {
+			candidate.dispose();
+			const message = err instanceof Error ? err.message : String(err);
+			this.panel.addEntry({ kind: "error", text: `Change directory failed: ${message}`, tag: "[ERROR]", isError: true });
+			this.flash(`Change directory failed: ${message}`);
+		}
+		this.markDirty();
 	}
 
 	private async exportSession(): Promise<void> {
@@ -2596,8 +2706,20 @@ class App {
 	private grepSearch(): void {
 		this.openPrompt("Search Text in Files (Grep)", "", (query) => {
 			if (!query.trim()) return;
-			void this.runViaRpc(`git grep -n "${query.trim()}"`);
+			void this.showGrepResults(query.trim());
 		});
+	}
+
+	private async showGrepResults(query: string): Promise<void> {
+		this.flash(`Searching for: ${query}`);
+		try {
+			const lines = await gitGrep(this.cwd, query);
+			const { cols, rows } = this.term.size();
+			this.overlay = { kind: "text", popup: new TextPopup(cols, rows, `Search: ${query}`, lines) };
+		} catch (err: unknown) {
+			this.flash(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		this.markDirty();
 	}
 
 	private abortRunningCommand(): void {
@@ -2632,36 +2754,55 @@ class App {
 	private async cycleThinkingLevel(): Promise<void> {
 		// 1. Try standard cycle_thinking_level RPC
 		const resp = await this.client.request<{ level?: string }>({ type: "cycle_thinking_level" });
-		if (resp.success && resp.data?.level) {
-			this.thinkingLevel = resp.data.level;
-			this.flash(`Thinking level: ${resp.data.level}`);
-			this.panel.addEntry({ kind: "info", text: `Thinking level set to: ${resp.data.level}` });
+		const cycledLevel = resp.data?.level ? parseThinkingLevel(resp.data.level) : null;
+		if (resp.success && cycledLevel) {
+			this.thinkingLevel = cycledLevel === "off" ? null : cycledLevel;
+			this.syncCustomModelReasoning(cycledLevel !== "off");
+			this.flash(`Thinking level: ${cycledLevel}`);
+			this.panel.addEntry({ kind: "info", text: `Thinking level set to: ${cycledLevel}` });
 			this.markDirty();
 			return;
 		}
 
 		// 2. Fallback: cycle through levels [low, medium, high, off] and explicitly set via set_thinking_level
-		const levels = ["low", "medium", "high", "off"];
-		const curIdx = this.thinkingLevel ? levels.indexOf(this.thinkingLevel.toLowerCase()) : -1;
+		const levels: ThinkingLevel[] = ["low", "medium", "high", "off"];
+		const currentLevel = this.thinkingLevel ? parseThinkingLevel(this.thinkingLevel) : null;
+		const curIdx = currentLevel ? levels.indexOf(currentLevel) : -1;
 		const nextLevel = levels[(curIdx + 1) % levels.length]!;
-
-		if (this.model && this.model.includes("/")) {
-			const slash = this.model.indexOf("/");
-			const p = this.model.slice(0, slash);
-			const m = this.model.slice(slash + 1);
-			setCustomModelReasoning(p, m, true);
-		}
 
 		const setResp = await this.client.request<{ level?: string }>({
 			type: "set_thinking_level",
 			level: nextLevel,
-		} as unknown as RpcCommand);
+		});
+		if (!setResp.success) {
+			const message = setResp.error ?? "Failed to cycle thinking effort";
+			this.flash(message);
+			this.panel.addEntry({ kind: "error", text: message, tag: "[ERROR]", isError: true });
+			this.markDirty();
+			return;
+		}
 
 		this.thinkingLevel = nextLevel === "off" ? null : nextLevel;
+		this.syncCustomModelReasoning(nextLevel !== "off");
 		const displayMsg = `Thinking effort set to: ${nextLevel}`;
 		this.flash(displayMsg);
 		this.panel.addEntry({ kind: "info", text: displayMsg });
 		this.markDirty();
+	}
+
+	private syncCustomModelReasoning(enabled: boolean): void {
+		if (!this.model?.includes("/")) return;
+		const slash = this.model.indexOf("/");
+		try {
+			setCustomModelReasoning(this.model.slice(0, slash), this.model.slice(slash + 1), enabled);
+		} catch (err: unknown) {
+			this.panel.addEntry({
+				kind: "error",
+				text: `Could not update models.json reasoning flag: ${err instanceof Error ? err.message : String(err)}`,
+				tag: "[ERROR]",
+				isError: true,
+			});
+		}
 	}
 
 	private async compactSession(): Promise<void> {
@@ -2726,7 +2867,6 @@ class App {
 			const resp = await this.client.request({ type: "set_session_name", name: name.trim() });
 			if (resp.success) {
 				this.sessionName = name.trim();
-				this.addRecentSession(this.getEffectiveSessionName());
 				this.flash(`Session renamed: "${name.trim()}"`);
 				this.panel.addEntry({ kind: "info", text: `Session name: ${name.trim()}` });
 			} else {
@@ -2786,25 +2926,24 @@ class App {
 		const lines = [
 			"TURBO-AI User & Command Guide",
 			"═".repeat(45),
-			"Navigation & Panes:",
-			"  Tab         Switch between FILES, AGENT, and MESSAGE",
-			"  F3          Jump directly to FILES pane",
-			"  F4          Jump directly to AGENT pane",
-			"  F5          Zoom active window (or restore tiled layout)",
-			"  F10         Activate top Menu Bar",
-			"  Alt+X       Cleanly exit to DOS / shell",
-			"",
-			"AI Agent & Models:",
-			"  F2          Open AI Model Selector dialog",
-			"  Ctrl+C      Abort active AI generation or command",
-			"  Ctrl+L      Clear message history from AGENT screen",
-			"",
-			"Git & Development:",
-			"  F6          Open Git status viewer",
-			"  F7          Open interactive unified Diff viewer",
+			"Primary commands:",
+			"  F1          Open keyboard help",
+			"  F2          Save conversation transcript",
+			"  F3          Open or resume a saved session",
+			"  F4          Open AI model selector",
+			"  F5          Cycle thinking effort",
+			"  F6          Toggle PLAN / BUILD mode",
+			"  F7          Open unified Git diff",
 			"  F8          Run project test suite (npm test)",
 			"  F9          Build project artifacts (npm run build)",
+			"  F10         Activate top menu bar",
+			"",
+			"Navigation & editing:",
+			"  Tab         Switch between FILES, AGENT, and MESSAGE",
+			"  Ctrl+C      Abort active AI generation or command",
+			"  Ctrl+L      Clear message history from AGENT screen",
 			"  Ctrl+F      Filter and find files in tree",
+			"  Alt+X       Cleanly exit to DOS / shell",
 			"",
 			"Menu Shortcuts:",
 			"  Alt+F       File menu       Alt+G  Git menu",
@@ -2851,6 +2990,16 @@ class App {
 		if (this.closed) return;
 		this.closed = true;
 		this.stopSpinner();
+		if (this.activityTimer) clearInterval(this.activityTimer);
+		if (this.gitPollTimer) clearInterval(this.gitPollTimer);
+		if (this.statusMessageTimer) clearTimeout(this.statusMessageTimer);
+		this.activityTimer = null;
+		this.gitPollTimer = null;
+		this.statusMessageTimer = null;
+		process.removeListener("exit", this.processExitHandler);
+		process.removeListener("SIGINT", this.sigintHandler);
+		process.removeListener("SIGTERM", this.sigtermHandler);
+		this.unbindClient(this.client);
 		this.client.dispose();
 		this.screen.stop();
 		this.term.leave();
@@ -2865,12 +3014,23 @@ function firstRealLine(output: string): string {
 
 // ----------------------------------------------------------------------------
 
-const cwdArgIdx = process.argv.indexOf("--dir");
-const cwdArg = cwdArgIdx !== -1 ? process.argv[cwdArgIdx + 1] : undefined;
-const cwd = cwdArg ?? process.cwd();
+export function runCli(args = process.argv.slice(2), defaultCwd = process.cwd()): void {
+	const cli = parseCliArgs(args, defaultCwd);
+	if (cli.error) {
+		console.error(`${cli.error}\n${CLI_USAGE}`);
+		process.exitCode = 2;
+		return;
+	}
+	if (cli.help) {
+		console.log(CLI_USAGE);
+		return;
+	}
+	const app = new App(cli.cwd);
+	app.run().catch((err) => {
+		console.error(err instanceof Error ? err.message : String(err));
+		process.exit(1);
+	});
+}
 
-const app = new App(cwd);
-app.run().catch((err) => {
-	console.error(err instanceof Error ? err.message : String(err));
-	process.exit(1);
-});
+const entryPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
+if (entryPath === import.meta.url) runCli();

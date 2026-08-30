@@ -115,9 +115,16 @@ npm start
 npm start -- --dir C:/path/to/project
 ```
 
+Changing the directory from the File menu reconnects Pi in the selected project and starts a new backend session. If the new connection fails, the current project and session stay active.
+
 ### Running unit tests:
 ```bash
 npm test
+```
+
+### Running all checks:
+```bash
+npm run check
 ```
 
 ---

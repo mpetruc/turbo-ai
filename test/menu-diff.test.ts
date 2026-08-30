@@ -6,6 +6,7 @@ import { MAIN_MENUS, MenuBar } from "../src/ui/menu-bar.js";
 import { DiffViewer, parseUnifiedDiff } from "../src/ui/diff-viewer.js";
 import { AgentPanel } from "../src/ui/agent-panel.js";
 import { InputLine } from "../src/ui/input-line.js";
+import { PromptDialog } from "../src/ui/prompt-dialog.js";
 import { TextPopup } from "../src/ui/text-popup.js";
 import { copyToClipboard } from "../src/commands/commands.js";
 import { getKeyBarSlotAtX } from "../src/ui/status-bar.js";
@@ -84,19 +85,19 @@ test("MenuBar dynamically appends up to 9 recent sessions with numbered mnemonic
 	assert.equal(recentItems.length, 4);
 	assert.equal(recentItems[0]?.label, "1. NONAME00.PAS");
 	assert.equal(recentItems[0]?.mnemonic, "1");
-	assert.equal(recentItems[0]?.action, "file.recent:NONAME00.PAS");
+	assert.equal(recentItems[0]?.action, "file.recent:0");
 	assert.equal(recentItems[1]?.label, "2. AUTH_MODULE.PAS");
 	assert.equal(recentItems[1]?.mnemonic, "2");
-	assert.equal(recentItems[1]?.action, "file.recent:AUTH_MODULE.PAS");
+	assert.equal(recentItems[1]?.action, "file.recent:1");
 
 	const st = new MenuState(fileMenu);
 	const idx1 = st.findByMnemonic("1");
 	assert.ok(idx1 !== null);
-	assert.equal(fileMenu.items[idx1]?.action, "file.recent:NONAME00.PAS");
+	assert.equal(fileMenu.items[idx1]?.action, "file.recent:0");
 
 	const idx2 = st.findByMnemonic("2");
 	assert.ok(idx2 !== null);
-	assert.equal(fileMenu.items[idx2]?.action, "file.recent:AUTH_MODULE.PAS");
+	assert.equal(fileMenu.items[idx2]?.action, "file.recent:1");
 });
 
 test("MAIN_MENUS has 10 menus with unique mnemonics and valid actions", () => {
@@ -288,4 +289,19 @@ test("getKeyBarSlotAtX maps exact character columns to F1-F10 slots", () => {
 
 	// When flash message is active: no slots
 	assert.equal(getKeyBarSlotAtX(3, cols, false, true), null);
+});
+
+test("PromptDialog masks secret values while retaining the submitted key", () => {
+	const screen = new Screen();
+	screen.resize(80, 24);
+	const dialog = new PromptDialog(80, 24, "API key", "secret-value", true);
+	dialog.render(screen);
+	const inputX = dialog.rect.x + 3;
+	const inputY = dialog.rect.y + 2;
+	let rendered = "";
+	for (let index = 0; index < "secret-value".length; index++) {
+		rendered += screen.getCell(inputX + index, inputY)?.ch ?? "";
+	}
+	assert.equal(rendered, "*".repeat("secret-value".length));
+	assert.equal(dialog.submit(), "secret-value");
 });
