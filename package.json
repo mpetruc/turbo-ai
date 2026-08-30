@@ -1,6 +1,6 @@
 {
   "name": "turbo-ai",
-  "version": "1.0.1-beta",
+  "version": "1.0.2-beta",
   "description": "Turbo Pascal 7 inspired TUI frontend for the Pi coding agent (RPC mode)",
   "type": "module",
   "main": "dist/main.js",
