@@ -110,8 +110,24 @@ npm run build
 npm start
 ```
 
+### Running from any folder (global command):
+
+Register the global `turbo-ai` launcher once, then start it from any project directory — it always targets the folder you are in:
+
+```bash
+# One-time (from the repository folder)
+npm link
+
+# Then, from any project:
+cd ~/my-project
+turbo-ai
+```
+
+An alternative one-time install is `npm install -g .` from the repository folder. The launcher runs the compiled `dist/` build, and the `prepare` script rebuilds it automatically during linking/installing.
+
 ### Running in a specific directory:
 ```bash
+turbo-ai --dir C:/path/to/project
 npm start -- --dir C:/path/to/project
 ```
 
