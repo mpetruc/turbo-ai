@@ -1,0 +1,12 @@
+# Line-ending policy: this repo is built and tested from both Linux and
+# Windows. Every text file is stored with LF in the repository and checked
+# out as LF on every platform, so a working tree is byte-identical no
+# matter which OS ran the checkout - no more whole-tree "modified" churn.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF. Uncomment when the first one lands:
+# *.bat text eol=crlf
+# *.cmd text eol=crlf
+
+# Binaries: never normalize, never diff as text.
+*.png binary
