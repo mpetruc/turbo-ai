@@ -156,36 +156,36 @@ test("tool output can be expanded past the preview", () => {
 test("AgentPanel wraps agent prose at word boundaries", () => {
 	const p = new AgentPanel();
 	p.addEntry({ kind: "agent", text: "the quick brown fox jumps over the lazy dog" });
-	const rows = renderRows(p, 20, 10); // inner width 18
-	assert.equal(rows[0], "the quick brown");
-	assert.equal(rows[1], "fox jumps over");
-	assert.equal(rows[2], "the lazy dog");
+	const rows = renderPanel(p, 20, 10).rows; // inner width 18
+	assert.equal(rows[0]?.text, "the quick brown");
+	assert.equal(rows[1]?.text, "fox jumps over");
+	assert.equal(rows[2]?.text, "the lazy dog");
 });
 
 test("AgentPanel re-wraps prose when the pane width changes", () => {
 	const p = new AgentPanel();
 	p.addEntry({ kind: "agent", text: "the quick brown fox jumps over the lazy dog" });
-	const narrow = renderRows(p, 20, 10); // inner width 18
-	assert.equal(narrow[0], "the quick brown");
+	const narrow = renderPanel(p, 20, 10).rows; // inner width 18
+	assert.equal(narrow[0]?.text, "the quick brown");
 
-	const wide = renderRows(p, 40, 10); // inner width 38
-	assert.equal(wide[0], "the quick brown fox jumps over the");
-	assert.equal(wide[1], "lazy dog");
+	const wide = renderPanel(p, 40, 10).rows; // inner width 38
+	assert.equal(wide[0]?.text, "the quick brown fox jumps over the");
+	assert.equal(wide[1]?.text, "lazy dog");
 });
 
 test("AgentPanel wraps tool output instead of truncating it", () => {
 	const p = new AgentPanel();
 	p.addEntry({ kind: "tool", tag: "[BASH]", text: "alpha beta gamma delta" });
-	const rows = renderRows(p, 22, 10); // inner width 20, body width 14
-	assert.equal(rows[0], "[BASH]   alpha beta");
-	assert.equal(rows[1], "gamma delta");
+	const rows = renderPanel(p, 22, 10).rows; // inner width 20, body width 14
+	assert.equal(rows[0]?.text, "[BASH]   alpha beta");
+	assert.equal(rows[1]?.text, "gamma delta");
 });
 
 test("AgentPanel hard-breaks unbreakable words without losing characters", () => {
 	const word = "A".repeat(40);
 	const p = new AgentPanel();
 	p.addEntry({ kind: "agent", text: word });
-	const rows = renderRows(p, 20, 10); // inner width 18
-	assert.equal(rows[0], "A".repeat(18));
-	assert.equal(rows.join(""), "A".repeat(40));
+	const rows = renderPanel(p, 20, 10).rows; // inner width 18
+	assert.equal(rows[0]?.text, "A".repeat(18));
+	assert.equal(rows.map((r) => r.text).join(""), "A".repeat(40));
 });

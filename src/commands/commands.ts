@@ -194,33 +194,82 @@ export function getSystemInfo(cwd: string, cols: number, rows: number): string[]
 	];
 }
 
-/** Copy text to system clipboard using OSC 52 and OS clipboard utilities (clip.exe / pbcopy / xclip). */
+interface ClipboardHelper {
+	cmd: string;
+	args: string[];
+}
+
+/**
+ * Resolve an installed OS clipboard helper for the current platform, or null when none
+ * is available. On Linux the first available of wl-copy / xclip / xsel is used,
+ * preferring the tool that matches the active session type.
+ */
+export function clipboardHelper(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env
+): ClipboardHelper | null {
+	if (platform === "win32") return { cmd: "clip.exe", args: [] };
+	if (platform === "darwin") return { cmd: "pbcopy", args: [] };
+
+	const xclip: ClipboardHelper = { cmd: "xclip", args: ["-selection", "clipboard"] };
+	const xsel: ClipboardHelper = { cmd: "xsel", args: ["--clipboard", "--input"] };
+	const wlCopy: ClipboardHelper = { cmd: "wl-copy", args: [] };
+	const candidates = env.WAYLAND_DISPLAY ? [wlCopy, xclip, xsel] : [xclip, xsel, wlCopy];
+
+	for (const c of candidates) {
+		const resolved = findExecutable(c.cmd, env.PATH ?? "", platform);
+		if (resolved) return { cmd: resolved, args: c.args };
+	}
+	return null;
+}
+
+/** Absolute path of `cmd` on PATH if it exists and is executable, else null. */
+function findExecutable(cmd: string, pathVar: string, platform: NodeJS.Platform): string | null {
+	const exts = platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
+	for (const dir of pathVar.split(path.delimiter)) {
+		if (!dir) continue;
+		for (const ext of exts) {
+			const full = path.join(dir, cmd + ext);
+			try {
+				fs.accessSync(full, fs.constants.X_OK);
+				return full;
+			} catch {
+				// not in this directory; keep searching
+			}
+		}
+	}
+	return null;
+}
+
+/**
+ * Copy text to system clipboard using OSC 52 and OS clipboard utilities
+ * (clip.exe / pbcopy / wl-copy / xclip / xsel).
+ */
 export function copyToClipboard(text: string): boolean {
 	if (!text) return false;
+
+	// 1. OSC 52 sequence (instant in modern terminal emulators; no OS helper needed)
 	try {
-		// 1. OSC 52 sequence (instant in modern terminal emulators)
 		const base64 = Buffer.from(text, "utf8").toString("base64");
 		process.stdout.write(`\x1b]52;c;${base64}\x07`);
 	} catch {}
 
+	// 2. OS clipboard utility as a backup. Never spawn blindly: spawn() does NOT throw
+	//    when a binary is missing — it emits an async 'error' event on the child, and an
+	//    unhandled 'error' event crashes the process. Resolve an installed helper first
+	//    and attach error listeners so any failure degrades silently to OSC 52.
 	try {
-		if (process.platform === "win32") {
-			const proc = spawn("clip.exe", [], { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] });
-			proc.stdin.write(text);
-			proc.stdin.end();
-		} else if (process.platform === "darwin") {
-			const proc = spawn("pbcopy", [], { stdio: ["pipe", "ignore", "ignore"] });
-			proc.stdin.write(text);
-			proc.stdin.end();
-		} else {
-			const proc = spawn("xclip", ["-selection", "clipboard"], { stdio: ["pipe", "ignore", "ignore"] });
-			proc.stdin.write(text);
-			proc.stdin.end();
-		}
-		return true;
+		const helper = clipboardHelper();
+		if (!helper) return true;
+		const proc = spawn(helper.cmd, helper.args, { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
+		proc.on("error", () => {});
+		proc.stdin.on("error", () => {});
+		proc.stdin.write(text);
+		proc.stdin.end();
 	} catch {
-		return true;
+		// ignore — OSC 52 already attempted
 	}
+	return true;
 }
 
 /** Parse a simple .env file into key-value map. */
