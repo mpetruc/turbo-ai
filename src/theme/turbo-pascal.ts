@@ -101,6 +101,12 @@ export const THEME = {
 	thinkingText: { fg: D.LIGHTGRAY, bg: D.BLUE },
 	thinkingBadge: { fg: D.YELLOW, bg: D.BLACK },
 
+	// Message-type shading: LIGHTBLUE backgrounds mark live/active rows (pi TUI
+	// toolPendingBg role), DARKGRAY dims settled tool output (toolOutput role).
+	thinkingLive: { fg: D.BLACK, bg: D.LIGHTBLUE },
+	toolPending: { fg: D.BLACK, bg: D.LIGHTBLUE },
+	toolResultText: { fg: D.DARKGRAY, bg: D.BLUE },
+
 	diffMinus: { fg: D.LIGHTRED, bg: D.BLUE },
 	diffPlus: { fg: D.LIGHTGREEN, bg: D.BLUE },
 	diffHunk: { fg: D.LIGHTCYAN, bg: D.BLUE },

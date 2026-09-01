@@ -55,6 +55,67 @@ test("eventToEntries maps tool_execution_start", () => {
 	assert.equal(res.entries[0].text, "src/a.ts");
 });
 
+test("eventToEntries tags tool_execution_start entries with toolCallId and pending", () => {
+	const res = eventToEntries({ type: "tool_execution_start", toolCallId: "call_7", toolName: "edit", args: { path: "a.ts" } });
+	assert.equal(res.entries[0]?.toolCallId, "call_7");
+	assert.equal(res.entries[0]?.pending, true);
+});
+
+test("eventToEntries: toolcall_end emits no duplicate tool entry", () => {
+	const res = eventToEntries({
+		type: "message_update",
+		message: { role: "assistant", content: [] },
+		assistantMessageEvent: {
+			type: "toolcall_end",
+			contentIndex: 0,
+			toolCall: { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "npm test" } },
+		},
+	});
+	assert.equal(res.entries.length, 0, "toolcall_end must not create an empty [TOOL] stub entry");
+});
+
+test("eventToEntries routes tool_execution_update partial output to toolUpdate", () => {
+	const res = eventToEntries({
+		type: "tool_execution_update",
+		toolCallId: "call_1",
+		toolName: "bash",
+		partialResult: { content: [{ type: "text", text: "compiling...\nok" }] },
+	});
+	assert.equal(res.entries.length, 0);
+	assert.deepEqual(res.toolUpdate, { toolCallId: "call_1", text: "compiling...\nok", isError: false, final: false });
+});
+
+test("eventToEntries routes successful tool_execution_end to toolUpdate", () => {
+	const res = eventToEntries({
+		type: "tool_execution_end",
+		toolCallId: "call_1",
+		toolName: "bash",
+		isError: false,
+		result: { content: [{ type: "text", text: "1 passed\n2 skipped" }] },
+	});
+	assert.equal(res.entries.length, 0);
+	assert.deepEqual(res.toolUpdate, { toolCallId: "call_1", text: "1 passed\n2 skipped", isError: false, final: true });
+});
+
+test("eventToEntries: empty successful tool result still settles the pending row", () => {
+	const res = eventToEntries({ type: "tool_execution_end", toolCallId: "call_1", toolName: "read", isError: false });
+	assert.equal(res.entries.length, 0);
+	assert.deepEqual(res.toolUpdate, { toolCallId: "call_1", text: "", isError: false, final: true });
+});
+
+test("eventToEntries: tool_execution_end error settles the pending tool row", () => {
+	const res = eventToEntries({
+		type: "tool_execution_end",
+		toolCallId: "1",
+	toolName: "bash",
+		isError: true,
+		result: { content: [{ type: "text", text: "boom\nmore" }] },
+	});
+	assert.equal(res.entries.length, 1);
+	assert.equal(res.entries[0]?.kind, "error");
+	assert.deepEqual(res.toolUpdate, { toolCallId: "1", text: "", isError: true, final: true });
+});
+
 test("eventToEntries marks tool errors", () => {
 	const res = eventToEntries({
 		type: "tool_execution_end",

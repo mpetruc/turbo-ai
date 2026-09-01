@@ -70,6 +70,24 @@ export interface ToolCallContent {
 	arguments?: Record<string, unknown>;
 }
 
+/** A text-capable content block produced by tool execution. */
+export interface ToolContentBlock {
+	type: string;
+	text?: string;
+}
+
+/** Accumulated partial tool output (tool_execution_update). */
+export interface ToolPartialResult {
+	content?: ToolContentBlock[];
+}
+
+/** Final tool result payload (tool_execution_end). */
+export interface ToolExecutionResult {
+	content?: ToolContentBlock[];
+	details?: unknown;
+	usage?: unknown;
+}
+
 export type AssistantMessage = {
 	role: "assistant";
 	content: Array<TextContent | ToolCallContent | { type: "thinking"; thinking: string }>;
@@ -93,7 +111,7 @@ export type RpcEvent =
 	| { type: "turn_start" }
 	| { type: "turn_end"; message?: AssistantMessage; toolResults?: unknown[] }
 	| { type: "message_start"; message: unknown }
-	| { type: "message_update"; message: AssistantMessage; assistantMessageEvent: AssistantStreamEvent }
+	| { type: "message_update"; message?: AssistantMessage; assistantMessageEvent: AssistantStreamEvent }
 	| { type: "message_end"; message: AssistantMessage }
 	| {
 			type: "tool_execution_start";
@@ -106,16 +124,18 @@ export type RpcEvent =
 			toolCallId: string;
 			toolName: string;
 			args?: Record<string, unknown>;
-			partialResult?: { content?: Array<{ type: string; text?: string }> };
+			partialResult?: ToolPartialResult;
 	  }
 	| {
 			type: "tool_execution_end";
 			toolCallId: string;
 			toolName: string;
 			args?: Record<string, unknown>;
-			result?: { content?: Array<{ type: string; text?: string }>; details?: unknown };
+			result?: ToolExecutionResult;
 			isError?: boolean;
 	  }
+	| { type: "bash_execution_update"; id: string; delta: string }
+	| { type: "agent_settled" }
 	| { type: "queue_update"; steering?: string[]; followUp?: string[] }
 	| { type: "compaction_start"; reason?: string }
 	| {
@@ -139,7 +159,7 @@ export type AssistantStreamEvent =
 	| { type: "thinking_start"; contentIndex: number }
 	| { type: "thinking_delta"; contentIndex: number; delta: string }
 	| { type: "thinking_end"; contentIndex: number }
-	| { type: "toolcall_start"; contentIndex: number; toolCall?: ToolCallContent }
+	| { type: "toolcall_start"; contentIndex: number; id: string; toolName: string }
 	| { type: "toolcall_delta"; contentIndex: number; delta?: string }
 	| { type: "toolcall_end"; contentIndex: number; toolCall?: ToolCallContent }
 	| { type: "done"; reason?: string }

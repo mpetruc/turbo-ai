@@ -102,6 +102,30 @@ test("parseJsonlSession returns history without mutating a panel", () => {
 	}
 });
 
+test("parseJsonlSession merges tool_call part, execution, and toolResult into one entry", () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-tool-jsonl-"));
+
+	try {
+		const jsonlPath = path.join(tmpDir, "tool-session.jsonl");
+		const sampleLines = [
+			JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "tool_call", name: "bash", arguments: { command: "npm test" } }] } }),
+			JSON.stringify({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "npm test" } }),
+			JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId: "call_1", content: [{ type: "text", text: "1 passed" }], isError: false } }),
+		].join("\n");
+
+		fs.writeFileSync(jsonlPath, sampleLines, "utf8");
+
+		const meta = parseJsonlSession(jsonlPath);
+		const toolEntries = meta.entries.filter((entry) => entry.kind === "tool");
+		assert.equal(toolEntries.length, 1, "assistant tool_call + tool_execution_start must produce exactly one tool entry");
+		assert.equal(toolEntries[0]?.tag, "[BASH]");
+		assert.equal(toolEntries[0]?.text, "npm test");
+		assert.equal(toolEntries[0]?.resultText, "1 passed");
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test("getProjectSessions respects PI_CONFIG_DIR", async () => {
 	const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-project-"));
 	const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-config-"));
