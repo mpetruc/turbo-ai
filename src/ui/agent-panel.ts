@@ -1,7 +1,7 @@
 import { packAttr, THEME, type ColorAttr } from "../theme/turbo-pascal.js";
 import { inner, type Rect } from "../utils/layout.js";
 import type { AgentEntry } from "../rpc/events.js";
-import type { Screen } from "./screen.js";
+import { charDisplayWidth, truncateToWidth, type Screen } from "./screen.js";
 
 interface RenderLine {
 	segments: Array<{ text: string; attr: number }>;
@@ -306,11 +306,12 @@ export class AgentPanel {
 			for (const seg of line.segments) {
 				if (x >= area.x + area.w) break;
 				for (let i = 0; i < seg.text.length; i++) {
-					if (x >= area.x + area.w) break;
 					const char = seg.text[i]!;
+					const cw = charDisplayWidth(char);
+					if (x + cw > area.x + area.w) break;
 					const isSel = sel ? isPosInSelection(lineIdx, col, sel) : false;
 					screen.setCell(x, area.y + row, char, isSel ? selAttr : seg.attr);
-					x++;
+					x += cw;
 					col++;
 				}
 			}
@@ -381,7 +382,7 @@ export class AgentPanel {
 						if (raw.startsWith("```")) {
 							inCodeBlock = !inCodeBlock;
 							out.push({
-								segments: [{ text: raw.slice(0, width), attr: packAttr(THEME.agentComment) }],
+								segments: [{ text: truncateToWidth(raw, width), attr: packAttr(THEME.agentComment) }],
 							});
 							continue;
 						}
@@ -429,7 +430,7 @@ export class AgentPanel {
 					if (e.resultText) {
 						const resAttr = packAttr(e.isError ? THEME.errorText : THEME.dimText);
 						for (const raw of resultExcerptLines(e.resultText, Math.max(1, width - 2), 10, e.resultLines)) {
-							out.push({ segments: [{ text: `  ${raw}`.slice(0, width), attr: resAttr }] });
+							out.push({ segments: [{ text: truncateToWidth(`  ${raw}`, width), attr: resAttr }] });
 						}
 					}
 					break;
@@ -443,7 +444,7 @@ export class AgentPanel {
 
 		if (thinking) {
 			const thinkingStr = ` ╟ Thinking [ ${thinking.spinner} ] (${thinking.elapsedSec.toFixed(1)}s)`;
-			out.push({ segments: [{ text: thinkingStr.slice(0, width), attr: packAttr(THEME.thinkingText) }] });
+			out.push({ segments: [{ text: truncateToWidth(thinkingStr, width), attr: packAttr(THEME.thinkingText) }] });
 		}
 
 		return out;
@@ -452,12 +453,57 @@ export class AgentPanel {
 
 function wrapText(text: string, width: number): string[] {
 	if (width <= 0) return [text];
-	if (text.length <= width) return [text];
+	if (displayWidthOf(text) <= width) return [text];
 	const lines: string[] = [];
-	for (let i = 0; i < text.length; i += width) {
-		lines.push(text.slice(i, i + width));
+	let i = 0;
+	// Advance from `from` until the next char would exceed `width` columns.
+	const consume = (from: number): number => {
+		let w = 0;
+		let j = from;
+		while (j < text.length) {
+			const cw = charDisplayWidth(text[j]!);
+			if (w + cw > width) break;
+			w += cw;
+			j++;
+		}
+		return j;
+	};
+	while (true) {
+		const end = consume(i);
+		if (end - i <= 0) {
+			// Degenerate width: not even one column fits; keep the text lossless.
+			lines.push(text.slice(i, i + 1));
+			i += 1;
+			continue;
+		}
+		if (end >= text.length) {
+			lines.push(text.slice(i));
+			break;
+		}
+		let k = -1;
+		for (let j = end - 1; j >= i; j--) {
+			if (text[j] === " ") {
+				k = j;
+				break;
+			}
+		}
+		if (k >= 0) {
+			// Include the breaking space at the end of the chunk.
+			lines.push(text.slice(i, k + 1));
+			i = k + 1;
+		} else {
+			// No space in the window: hard-break the long word.
+			lines.push(text.slice(i, end));
+			i = end;
+		}
 	}
 	return lines;
+}
+
+function displayWidthOf(s: string): number {
+	let w = 0;
+	for (const ch of s) w += charDisplayWidth(ch);
+	return w;
 }
 
 /**
