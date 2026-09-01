@@ -391,6 +391,11 @@ export class App {
 			this.markDirty();
 			return;
 		}
+		if (res.toolUpdate) {
+			this.panel.updateToolEntry(res.toolUpdate.toolCallId, res.toolUpdate.text, res.toolUpdate.isError);
+			this.markDirty();
+			return;
+		}
 		if (res.error) {
 			this.isStreaming = false;
 			this.requestStart = null;

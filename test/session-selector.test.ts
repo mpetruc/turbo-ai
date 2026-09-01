@@ -102,6 +102,30 @@ test("parseJsonlSession returns history without mutating a panel", () => {
 	}
 });
 
+test("parseJsonlSession merges tool_call part, execution, and toolResult into one entry", () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-tool-jsonl-"));
+
+	try {
+		const jsonlPath = path.join(tmpDir, "tool-session.jsonl");
+		const sampleLines = [
+			JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "tool_call", name: "bash", arguments: { command: "npm test" } }] } }),
+			JSON.stringify({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "npm test" } }),
+			JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId: "call_1", content: [{ type: "text", text: "1 passed" }], isError: false } }),
+		].join("\n");
+
+		fs.writeFileSync(jsonlPath, sampleLines, "utf8");
+
+		const meta = parseJsonlSession(jsonlPath);
+		const toolEntries = meta.entries.filter((entry) => entry.kind === "tool");
+		assert.equal(toolEntries.length, 1, "assistant tool_call + tool_execution_start must produce exactly one tool entry");
+		assert.equal(toolEntries[0]?.tag, "[BASH]");
+		assert.equal(toolEntries[0]?.text, "npm test");
+		assert.equal(toolEntries[0]?.resultText, "1 passed");
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test("getProjectSessions respects PI_CONFIG_DIR", async () => {
 	const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-project-"));
 	const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-config-"));
@@ -123,5 +147,37 @@ test("getProjectSessions respects PI_CONFIG_DIR", async () => {
 		else process.env.PI_CONFIG_DIR = original;
 		fs.rmSync(projectDir, { recursive: true, force: true });
 		fs.rmSync(configDir, { recursive: true, force: true });
+	}
+});
+
+
+test("parseJsonlSession keeps two identical consecutive tool calls in separate rows", () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "turbo-ai-two-calls-jsonl-"));
+	try {
+		const jsonlPath = path.join(tmpDir, "two-calls.jsonl");
+		const sampleLines = [
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "tool_call", name: "bash", arguments: { command: "npm test" } },
+						{ type: "tool_call", name: "bash", arguments: { command: "npm test" } },
+					],
+				},
+			}),
+			JSON.stringify({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "npm test" } }),
+			JSON.stringify({ type: "tool_execution_start", toolCallId: "call_2", toolName: "bash", args: { command: "npm test" } }),
+			JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId: "call_1", content: [{ type: "text", text: "first" }], isError: false } }),
+			JSON.stringify({ type: "message", message: { role: "toolResult", toolCallId: "call_2", content: [{ type: "text", text: "second" }], isError: false } }),
+		].join("\n");
+		fs.writeFileSync(jsonlPath, sampleLines, "utf8");
+		const meta = parseJsonlSession(jsonlPath);
+		const toolEntries = meta.entries.filter((entry) => entry.kind === "tool");
+		assert.equal(toolEntries.length, 2, "identical consecutive calls must not collapse into one row");
+		assert.ok(toolEntries.some((entry) => entry.resultText?.includes("first")));
+		assert.ok(toolEntries.some((entry) => entry.resultText?.includes("second")));
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
 });

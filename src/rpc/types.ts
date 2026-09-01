@@ -70,6 +70,24 @@ export interface ToolCallContent {
 	arguments?: Record<string, unknown>;
 }
 
+/** A text-capable content block produced by tool execution. */
+export interface ToolContentBlock {
+	type: string;
+	text?: string;
+}
+
+/** Accumulated partial tool output (tool_execution_update). */
+export interface ToolPartialResult {
+	content?: ToolContentBlock[];
+}
+
+/** Final tool result payload (tool_execution_end). */
+export interface ToolExecutionResult {
+	content?: ToolContentBlock[];
+	details?: unknown;
+	usage?: unknown;
+}
+
 export type AssistantMessage = {
 	role: "assistant";
 	content: Array<TextContent | ToolCallContent | { type: "thinking"; thinking: string }>;
@@ -106,14 +124,14 @@ export type RpcEvent =
 			toolCallId: string;
 			toolName: string;
 			args?: Record<string, unknown>;
-			partialResult?: { content?: Array<{ type: string; text?: string }> };
+			partialResult?: ToolPartialResult;
 	  }
 	| {
 			type: "tool_execution_end";
 			toolCallId: string;
 			toolName: string;
 			args?: Record<string, unknown>;
-			result?: { content?: Array<{ type: string; text?: string }>; details?: unknown };
+			result?: ToolExecutionResult;
 			isError?: boolean;
 	  }
 	| { type: "queue_update"; steering?: string[]; followUp?: string[] }

@@ -8,6 +8,8 @@ interface RenderLine {
 }
 
 const MAX_LINES = 5000;
+/** Upper bound for stored tool result text (rendered as a 10-line excerpt). */
+const MAX_RESULT_CHARS = 20_000;
 
 // Classic Pascal & general programming keywords for retro syntax highlighting
 const PASCAL_KEYWORDS = new Set([
@@ -50,6 +52,46 @@ export class AgentPanel {
 	addEntry(entry: AgentEntry): void {
 		if (entry.kind === "tool" || entry.kind === "error") this.closeStream();
 		this.entries.push(entry);
+		this.trim();
+	}
+
+	/**
+	 * Attach tool result output to the matching tool entry (by toolCallId,
+	 * falling back to the most recent tool row). Creates a row when none exists.
+	 * tool_execution_update accumulates, so a fresh update replaces the previous one.
+	 */
+	updateToolEntry(toolCallId: string, text: string, isError: boolean): void {
+		const trimmed = text.trim();
+		if (!trimmed) return;
+		let target: AgentEntry | undefined;
+		for (let i = this.entries.length - 1; i >= 0; i--) {
+			const e = this.entries[i]!;
+			if (e.kind !== "tool") continue;
+			if (e.toolCallId === toolCallId) {
+				target = e;
+				break;
+			}
+			// Fallback (start row likely trimmed): only onto a row that has not
+			// received a result yet — never overwrite a settled row's output.
+			if (!target && !e.resultText) target = e;
+		}
+		if (target) {
+			// Skip echoing the args line back as a "result" (e.g. bash exited silently).
+			if (trimmed === target.text.trim()) return;
+			target.resultText = trimmed.slice(0, MAX_RESULT_CHARS);
+			target.isError = isError;
+			target.resultLines = trimmed.split("\n").length;
+		} else {
+			this.entries.push({
+				kind: "tool",
+				text: "",
+				tag: isError ? "[ERROR]" : "[OK]",
+				isError,
+				toolCallId,
+				resultText: trimmed.slice(0, MAX_RESULT_CHARS),
+				resultLines: trimmed.split("\n").length,
+			});
+		}
 		this.trim();
 	}
 
@@ -384,6 +426,12 @@ export class AgentPanel {
 							{ text: body.slice(0, width - 8), attr: packAttr(bodyTheme) },
 						],
 					});
+					if (e.resultText) {
+						const resAttr = packAttr(e.isError ? THEME.errorText : THEME.dimText);
+						for (const raw of resultExcerptLines(e.resultText, Math.max(1, width - 2), 10, e.resultLines)) {
+							out.push({ segments: [{ text: `  ${raw}`.slice(0, width), attr: resAttr }] });
+						}
+					}
 					break;
 				}
 
@@ -410,6 +458,23 @@ function wrapText(text: string, width: number): string[] {
 		lines.push(text.slice(i, i + width));
 	}
 	return lines;
+}
+
+/**
+ * Split tool result output into a bounded excerpt (first `maxLines` lines,
+ * each re-wrapped to `width`) plus a remaining-lines ellipsis — mirroring the
+ * pi TUI's collapsed tool-output preview.
+ */
+function resultExcerptLines(resultText: string, width: number, maxLines = 10, totalLines?: number): string[] {
+	if (width <= 0) return [resultText];
+	const out: string[] = [];
+	const raw = resultText.replace(/\r\n/g, "\n").split("\n");
+	for (const line of raw.slice(0, maxLines)) {
+		for (const wrapped of wrapText(line, width)) out.push(wrapped);
+	}
+	const remaining = (totalLines ?? raw.length) - Math.min(raw.length, maxLines);
+	if (remaining > 0) out.push(`… (${remaining} more lines)`);
+	return out;
 }
 
 function highlightCodeLine(line: string): RenderLine {

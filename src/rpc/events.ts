@@ -1,4 +1,4 @@
-import type { RpcEvent, ToolCallContent } from "./types.js";
+import type { RpcEvent, ToolContentBlock } from "./types.js";
 
 export type EntryKind = "user" | "agent" | "tool" | "error" | "info" | "thinking";
 
@@ -9,6 +9,11 @@ export interface AgentEntry {
 	/** Tool tag like [READ]; only for kind === "tool". */
 	tag?: string;
 	isError?: boolean;
+	/** Execution id of the tool call (from tool_execution_start); lets result updates land on the right row. */
+	toolCallId?: string;
+	/** Bounded result output text attached to a tool entry; rendered as a dimmed excerpt. */
+	resultText?: string;
+	resultLines?: number;
 }
 
 /**
@@ -73,14 +78,6 @@ export function firstLine(s: string, maxLen: number): string {
 	return line.length > maxLen ? line.slice(0, maxLen - 1) + "…" : line;
 }
 
-/** Extract the toolCall object from a stream event if present. */
-export function extractToolCall(evt: { toolCall?: unknown }): ToolCallContent | undefined {
-	if (evt.toolCall && typeof evt.toolCall === "object" && "name" in evt.toolCall) {
-		return evt.toolCall as ToolCallContent;
-	}
-	return undefined;
-}
-
 /**
  * Convert a raw RPC event into zero or more agent panel entries.
  * Pure function — the panel just appends the results.
@@ -93,6 +90,8 @@ export function eventToEntries(event: RpcEvent): {
 	agentStarted?: boolean;
 	agentEnded?: boolean;
 	error?: string;
+	/** Tool result content to attach to the matching tool row (see AgentPanel.updateToolEntry). */
+	toolUpdate?: { toolCallId: string; text: string; isError: boolean };
 } {
 	switch (event.type) {
 		case "agent_start":
@@ -113,13 +112,11 @@ export function eventToEntries(event: RpcEvent): {
 			if (e.type === "text_start" || e.type === "thinking_start") {
 				return { entries: [], streamReset: true };
 			}
+			// toolcall_end marks the model's synthesized call; execution events
+			// (tool_execution_start/end) are the single source of tool rows, so no
+			// entry is created here — emitting one left a stray empty [TOOL] stub.
 			if (e.type === "toolcall_end") {
-				const tc = extractToolCall(e);
-				if (tc) {
-					return {
-						entries: [{ kind: "tool", text: "", tag: toolTag(tc.name), isError: false }],
-					};
-				}
+				return { entries: [] };
 			}
 			if (e.type === "error") {
 				const errMsg = e.errorMessage ?? e.reason ?? "Model error";
@@ -182,17 +179,35 @@ export function eventToEntries(event: RpcEvent): {
 						text: argsSummary(event.args),
 						tag: toolTag(event.toolName),
 						isError: false,
+						toolCallId: event.toolCallId,
 					},
 				],
 			};
 
+		case "tool_execution_update":
+			// partialResult carries the accumulated output so far; clients replace
+			// their display with it on every update (rpc.md).
+			{
+				const text = toolResultText(event.partialResult ?? null);
+				if (!text) return { entries: [] };
+				return { entries: [], toolUpdate: { toolCallId: event.toolCallId, text, isError: false } };
+			}
+
 		case "tool_execution_end":
-			// The start entry already exists; this produces a completion marker on errors.
+			// The start entry already exists; success attaches the result excerpt,
+			// errors produce a completion marker.
 			if (event.isError) {
 				const s = toolSummary(event.toolName, event.args, event.result, true);
 				return { entries: [{ kind: "error", text: s.text || "tool failed", tag: "[ERROR]", isError: true }] };
 			}
-			return { entries: [] };
+			{
+				// Compute the success summary with the real result so toolSummary's
+				// bash first-line branch stays reachable; prefer the full output text.
+				const summary = toolSummary(event.toolName, event.args, event.result, false);
+				const text = toolResultText(event.result ?? null) || summary.text;
+				if (!text) return { entries: [] };
+				return { entries: [], toolUpdate: { toolCallId: event.toolCallId, text, isError: false } };
+			}
 
 		case "extension_ui_request":
 			if (event.method === "notify") {
@@ -242,4 +257,14 @@ function argsSummary(args: Record<string, unknown> | undefined): string {
 		if (typeof v === "string") return v;
 	}
 	return "";
+}
+
+/** Join the text blocks of a tool result/partial result, trimmed. Empty when there is no output. */
+export function toolResultText(result: { content?: ToolContentBlock[] } | null | undefined): string {
+	if (!result?.content) return "";
+	return result.content
+		.filter((c) => c.type === "text")
+		.map((c) => c.text ?? "")
+		.join("\n")
+		.trim();
 }
