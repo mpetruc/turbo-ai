@@ -141,6 +141,7 @@ export class InputLine {
 	delete(): void {
 		if (this.cursorPos < this.value.length) {
 			this.value = this.value.slice(0, this.cursorPos) + this.value.slice(this.cursorPos + 1);
+			this.manualScroll = false;
 		}
 	}
 

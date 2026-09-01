@@ -155,6 +155,15 @@ test("InputLine scrolls visual rows and sticks after manual scroll", () => {
 	input.render(screen, WIN, true);
 	assert.equal(input.scrollRow, 3);
 
+	// Delete-only editing also re-enables follow (no stuck scrolled view)
+	input.left(); // cursor off the very end so delete() mutates
+	input.scrollBy(-10);
+	input.render(screen, WIN, true);
+	assert.equal(input.scrollRow, 0);
+	input.delete();
+	input.render(screen, WIN, true);
+	assert.equal(input.scrollRow, 3);
+
 	// scrollToRatio + scrollBy operate on visual-row space
 	input.scrollToRatio(0.5);
 	assert.equal(input.scrollRow, 2);
