@@ -9,11 +9,13 @@ export interface AgentEntry {
 	/** Tool tag like [READ]; only for kind === "tool". */
 	tag?: string;
 	isError?: boolean;
-	/** Execution id of the tool call (from tool_execution_start); lets result updates land on the right row. */
+	/** Execution id of the tool call; lets result updates land on the right row. */
 	toolCallId?: string;
-	/** Bounded result output text attached to a tool entry; rendered as a dimmed excerpt. */
+	/** Bounded result output attached to a tool entry; rendered as a dimmed excerpt. */
 	resultText?: string;
 	resultLines?: number;
+	/** True while the tool is executing; rendered with the toolPending background. */
+	pending?: boolean;
 }
 
 /**
@@ -90,8 +92,8 @@ export function eventToEntries(event: RpcEvent): {
 	agentStarted?: boolean;
 	agentEnded?: boolean;
 	error?: string;
-	/** Tool result content to attach to the matching tool row (see AgentPanel.updateToolEntry). */
-	toolUpdate?: { toolCallId: string; text: string; isError: boolean };
+	/** Tool result content to attach to the matching tool row; final=true settles a pending row. */
+	toolUpdate?: { toolCallId: string; text: string; isError: boolean; final?: boolean };
 } {
 	switch (event.type) {
 		case "agent_start":
@@ -180,33 +182,38 @@ export function eventToEntries(event: RpcEvent): {
 						tag: toolTag(event.toolName),
 						isError: false,
 						toolCallId: event.toolCallId,
+						pending: true,
 					},
 				],
 			};
 
 		case "tool_execution_update":
 			// partialResult carries the accumulated output so far; clients replace
-			// their display with it on every update (rpc.md).
+			// their display with it on every update (rpc.md). The tool is still running.
 			{
 				const text = toolResultText(event.partialResult ?? null);
 				if (!text) return { entries: [] };
-				return { entries: [], toolUpdate: { toolCallId: event.toolCallId, text, isError: false } };
+				return { entries: [], toolUpdate: { toolCallId: event.toolCallId, text, isError: false, final: false } };
 			}
 
 		case "tool_execution_end":
 			// The start entry already exists; success attaches the result excerpt,
-			// errors produce a completion marker.
+			// errors produce a completion marker and settle the pending row.
 			if (event.isError) {
 				const s = toolSummary(event.toolName, event.args, event.result, true);
-				return { entries: [{ kind: "error", text: s.text || "tool failed", tag: "[ERROR]", isError: true }] };
+				return {
+					entries: [{ kind: "error", text: s.text || "tool failed", tag: "[ERROR]", isError: true }],
+					toolUpdate: { toolCallId: event.toolCallId, text: "", isError: true, final: true },
+				};
 			}
 			{
 				// Compute the success summary with the real result so toolSummary's
 				// bash first-line branch stays reachable; prefer the full output text.
 				const summary = toolSummary(event.toolName, event.args, event.result, false);
 				const text = toolResultText(event.result ?? null) || summary.text;
-				if (!text) return { entries: [] };
-				return { entries: [], toolUpdate: { toolCallId: event.toolCallId, text, isError: false } };
+				// Always emit a (possibly empty) final update so the pending row
+				// settles even when the tool produced no output at all.
+				return { entries: [], toolUpdate: { toolCallId: event.toolCallId, text, isError: false, final: true } };
 			}
 
 		case "extension_ui_request":
@@ -241,9 +248,6 @@ export function eventToEntries(event: RpcEvent): {
 				return { entries: [{ kind: "error", text: `Retry failed: ${firstLine(event.finalError ?? "", 120)}`, tag: "[ERROR]", isError: true }] };
 			}
 			return { entries: [] };
-
-		case "extension_error":
-			return { entries: [{ kind: "error", text: `Extension error: ${firstLine(String(event.error ?? ""), 120)}`, tag: "[ERROR]", isError: true }] };
 
 		default:
 			return { entries: [] };

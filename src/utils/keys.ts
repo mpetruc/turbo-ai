@@ -34,6 +34,8 @@ export type AppAction =
 	| { kind: "find" } // Ctrl+F
 	| { kind: "clearView" } // Ctrl+L
 	| { kind: "cancel" } // Ctrl+C
+	| { kind: "toggleThinking" } // Ctrl+T
+	| { kind: "toggleToolOutput" } // Ctrl+O
 	| { kind: "exit" } // Alt+X
 	| { kind: "openMenu"; menu: string } // Alt+F, Alt+E, etc.
 	| { kind: "ignored" };
@@ -78,6 +80,10 @@ export function mapKey(key: KeyEvent): AppAction {
 				return { kind: "clearView" };
 			case "c":
 				return { kind: "cancel" };
+			case "t":
+				return { kind: "toggleThinking" };
+			case "o":
+				return { kind: "toggleToolOutput" };
 			default:
 				return { kind: "ignored" };
 		}

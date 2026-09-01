@@ -21,6 +21,11 @@ test("Ctrl shortcuts", () => {
 	assert.equal(mapKey(key({ name: "c", ctrl: true })).kind, "cancel");
 });
 
+test("Ctrl+T and Ctrl+O map to view toggles", () => {
+	assert.equal(mapKey(key({ name: "t", ctrl: true })).kind, "toggleThinking");
+	assert.equal(mapKey(key({ name: "o", ctrl: true })).kind, "toggleToolOutput");
+});
+
 test("Alt+X exits", () => {
 	assert.equal(mapKey(key({ name: "x", alt: true })).kind, "exit");
 });

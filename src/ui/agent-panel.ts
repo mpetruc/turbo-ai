@@ -31,6 +31,10 @@ export class AgentPanel {
 	private thinkingOpen = false;
 	private scroll = 0;
 	private autoScroll = true;
+	/** Thinking blocks render as one collapsed live/static row unless expanded (Ctrl+T). */
+	private thinkingCollapsed = true;
+	/** Tool output renders as a 10-line preview unless expanded (Ctrl+O). */
+	private toolOutputExpanded = false;
 
 	clear(): void {
 		this.entries = [];
@@ -55,14 +59,34 @@ export class AgentPanel {
 		this.trim();
 	}
 
+	/** Toggle collapsed thinking; returns the new state. */
+	toggleThinkingCollapse(): boolean {
+		this.thinkingCollapsed = !this.thinkingCollapsed;
+		return this.thinkingCollapsed;
+	}
+
+	isThinkingCollapsed(): boolean {
+		return this.thinkingCollapsed;
+	}
+
+	/** Toggle expanded tool output; returns the new state. */
+	toggleToolOutputExpanded(): boolean {
+		this.toolOutputExpanded = !this.toolOutputExpanded;
+		return this.toolOutputExpanded;
+	}
+
+	isToolOutputExpanded(): boolean {
+		return this.toolOutputExpanded;
+	}
+
 	/**
 	 * Attach tool result output to the matching tool entry (by toolCallId,
 	 * falling back to the most recent tool row). Creates a row when none exists.
-	 * tool_execution_update accumulates, so a fresh update replaces the previous one.
+	 * tool_execution_update accumulates, so a fresh update replaces the previous one;
+	 * final=true settles the row (clears the pending background).
 	 */
-	updateToolEntry(toolCallId: string, text: string, isError: boolean): void {
+	updateToolEntry(toolCallId: string, text: string, isError: boolean, final = false): void {
 		const trimmed = text.trim();
-		if (!trimmed) return;
 		let target: AgentEntry | undefined;
 		for (let i = this.entries.length - 1; i >= 0; i--) {
 			const e = this.entries[i]!;
@@ -71,10 +95,12 @@ export class AgentPanel {
 				target = e;
 				break;
 			}
-			// Fallback (start row likely trimmed): only onto a row that has not
-			// received a result yet — never overwrite a settled row's output.
-			if (!target && !e.resultText) target = e;
+			// Fallback (start row likely trimmed): only onto a row that is still
+			// pending — never settle or overwrite an unrelated finished row.
+			if (!target && e.pending) target = e;
 		}
+		if (target && final) target.pending = false;
+		if (!trimmed) return;
 		if (target) {
 			// Skip echoing the args line back as a "result" (e.g. bash exited silently).
 			if (trimmed === target.text.trim()) return;
@@ -93,6 +119,13 @@ export class AgentPanel {
 			});
 		}
 		this.trim();
+	}
+
+	/** Clear the pending background from every tool row (turn end / abort / disconnect). */
+	settleAllPending(): void {
+		for (const e of this.entries) {
+			if (e.kind === "tool") e.pending = false;
+		}
 	}
 
 	appendThinkingDelta(delta: string): void {
@@ -364,11 +397,19 @@ export class AgentPanel {
 				}
 
 				case "thinking": {
-					const thinkAttr = packAttr(THEME.thinkingText);
-					const rawLines = e.text.split("\n");
-					for (const raw of rawLines) {
-						for (const wrapped of wrapText(raw, width)) {
-							out.push({ segments: [{ text: wrapped, attr: thinkAttr }] });
+					if (this.thinkingCollapsed) {
+						const live = Boolean(thinking) && this.thinkingOpen && e === this.entries[this.entries.length - 1];
+						const label = live
+							? `▸ Thinking [ ${thinking!.spinner} ] (${thinking!.elapsedSec.toFixed(1)}s)`
+							: "▸ Thinking";
+						out.push({ segments: [{ text: label.slice(0, width), attr: packAttr(live ? THEME.thinkingLive : THEME.thinkingText) }] });
+					} else {
+						const thinkAttr = packAttr(THEME.thinkingText);
+						const rawLines = e.text.split("\n");
+						for (const raw of rawLines) {
+							for (const wrapped of wrapText(raw, width)) {
+								out.push({ segments: [{ text: wrapped, attr: thinkAttr }] });
+							}
 						}
 					}
 					break;
@@ -410,15 +451,17 @@ export class AgentPanel {
 
 				case "tool":
 				case "error": {
+					const pending = Boolean(e.pending);
 					const tag = e.tag ?? (e.kind === "error" ? "[ERROR]" : "[OK]");
 					let tagTheme: ColorAttr = THEME.toolTag;
-					if (e.isError) tagTheme = THEME.toolTagErr;
+					if (pending) tagTheme = THEME.toolPending;
+					else if (e.isError) tagTheme = THEME.toolTagErr;
 					else if (tag === "[RUN]" || tag === "[BASH]") tagTheme = THEME.toolTagBash;
 					else if (tag === "[READ]" || tag === "[SEARCH]") tagTheme = THEME.toolTagRead;
 					else if (tag === "[WRITE]" || tag === "[EDIT]") tagTheme = THEME.toolTagWrite;
 					else if (tag === "[OK]") tagTheme = THEME.toolTagOk;
 
-					const bodyTheme = e.isError ? THEME.errorText : THEME.agentText;
+					const bodyTheme = pending ? THEME.toolPending : e.isError ? THEME.errorText : THEME.agentText;
 					const body = e.text ? ` ${e.text}` : "";
 					out.push({
 						segments: [
@@ -427,8 +470,12 @@ export class AgentPanel {
 						],
 					});
 					if (e.resultText) {
-						const resAttr = packAttr(e.isError ? THEME.errorText : THEME.dimText);
-						for (const raw of resultExcerptLines(e.resultText, Math.max(1, width - 2), 10, e.resultLines)) {
+						const resAttr = packAttr(e.isError ? THEME.errorText : THEME.toolResultText);
+						const resultWidth = Math.max(1, width - 2);
+						const resLines = this.toolOutputExpanded
+							? wrapAllLines(e.resultText, resultWidth)
+							: resultExcerptLines(e.resultText, resultWidth, 10, e.resultLines);
+						for (const raw of resLines) {
 							out.push({ segments: [{ text: `  ${raw}`.slice(0, width), attr: resAttr }] });
 						}
 					}
@@ -441,7 +488,7 @@ export class AgentPanel {
 			}
 		}
 
-		if (thinking) {
+		if (thinking && !this.thinkingCollapsed) {
 			const thinkingStr = ` ╟ Thinking [ ${thinking.spinner} ] (${thinking.elapsedSec.toFixed(1)}s)`;
 			out.push({ segments: [{ text: thinkingStr.slice(0, width), attr: packAttr(THEME.thinkingText) }] });
 		}
@@ -460,6 +507,15 @@ function wrapText(text: string, width: number): string[] {
 	return lines;
 }
 
+/** Wrap every line of a (possibly multi-line) block to `width`. */
+function wrapAllLines(text: string, width: number): string[] {
+	const out: string[] = [];
+	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+		for (const wrapped of wrapText(raw, width)) out.push(wrapped);
+	}
+	return out;
+}
+
 /**
  * Split tool result output into a bounded excerpt (first `maxLines` lines,
  * each re-wrapped to `width`) plus a remaining-lines ellipsis — mirroring the
@@ -473,7 +529,7 @@ function resultExcerptLines(resultText: string, width: number, maxLines = 10, to
 		for (const wrapped of wrapText(line, width)) out.push(wrapped);
 	}
 	const remaining = (totalLines ?? raw.length) - Math.min(raw.length, maxLines);
-	if (remaining > 0) out.push(`… (${remaining} more lines)`);
+	if (remaining > 0) out.push(`… (${remaining} more lines, Ctrl+O to expand)`);
 	return out;
 }
 

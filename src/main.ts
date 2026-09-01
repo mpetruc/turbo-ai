@@ -370,6 +370,7 @@ export class App {
 			this.isStreaming = false;
 			this.requestStart = null;
 			this.stopSpinner();
+			this.panel.settleAllPending();
 			this.panel.closeStream();
 			void this.pollStats();
 			void this.pollGit();
@@ -377,6 +378,7 @@ export class App {
 			return;
 		}
 		if (res.streamReset) {
+			this.panel.settleAllPending();
 			this.panel.closeStream();
 			this.markDirty();
 			return;
@@ -392,7 +394,7 @@ export class App {
 			return;
 		}
 		if (res.toolUpdate) {
-			this.panel.updateToolEntry(res.toolUpdate.toolCallId, res.toolUpdate.text, res.toolUpdate.isError);
+			this.panel.updateToolEntry(res.toolUpdate.toolCallId, res.toolUpdate.text, res.toolUpdate.isError, res.toolUpdate.final);
 			this.markDirty();
 			return;
 		}
@@ -400,6 +402,7 @@ export class App {
 			this.isStreaming = false;
 			this.requestStart = null;
 			this.stopSpinner();
+			this.panel.settleAllPending();
 			this.panel.closeStream();
 			this.flash(`Error: ${res.error}`);
 			this.markDirty();
@@ -445,6 +448,7 @@ export class App {
 		this.isStreaming = false;
 		this.isBash = false;
 		this.stopSpinner();
+		this.panel.settleAllPending();
 		const entry: AgentEntry = { kind: "error", text: "PI DISCONNECTED - the agent process exited.", tag: "[ERROR]", isError: true };
 		this.panel.addEntry(entry);
 		this.flash("PI DISCONNECTED");
@@ -1348,6 +1352,16 @@ export class App {
 			case "clearView":
 				this.panel.clear();
 				this.flash("Agent view cleared");
+				return;
+			case "toggleThinking":
+				this.panel.toggleThinkingCollapse();
+				this.markDirty();
+				this.flash(this.panel.isThinkingCollapsed() ? "Thinking collapsed" : "Thinking expanded");
+				return;
+			case "toggleToolOutput":
+				this.panel.toggleToolOutputExpanded();
+				this.markDirty();
+				this.flash(this.panel.isToolOutputExpanded() ? "Tool output expanded" : "Tool output preview");
 				return;
 		}
 
