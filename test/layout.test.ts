@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeLayout, centerRect, formatTokens, inner, minSize } from "../src/utils/layout.js";
+import { computeLayout, centerRect, formatTokens, inner, inputTextWidth, minSize } from "../src/utils/layout.js";
 
 test("computeLayout produces non-overlapping panes at 120x40", () => {
 	const l = computeLayout(120, 40);
@@ -39,6 +39,12 @@ test("formatTokens formats like a TP status bar", () => {
 	assert.equal(formatTokens(18400), "18.4k tokens");
 	assert.equal(formatTokens(950), "950 tokens");
 	assert.equal(formatTokens(null), null);
+});
+
+test("inputTextWidth matches the input window text area", () => {
+	assert.equal(inputTextWidth(60), 34); // treeW 20, rightW 40, minus 6
+	assert.equal(inputTextWidth(80), 52); // treeW 22, rightW 58, minus 6
+	assert.equal(inputTextWidth(120), 80); // treeW 34, rightW 86, minus 6
 });
 
 test("computeLayout adapts dynamically to inputHeight and clamps to half screen", () => {

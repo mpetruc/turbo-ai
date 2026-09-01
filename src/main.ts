@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { packAttr, THEME } from "./theme/turbo-pascal.js";
-import { centerRect, inner, computeLayout, isInRect, type Layout } from "./utils/layout.js";
+import { centerRect, inner, computeLayout, inputTextWidth, isInRect, type Layout } from "./utils/layout.js";
 import { PiClient } from "./rpc/pi-client.js";
 import { eventToEntries, type AgentEntry } from "./rpc/events.js";
 import { parseThinkingLevel, type ModelInfo, type RpcEvent, type RpcResponse, type SessionStateData, type SessionStatsData, type ThinkingLevel } from "./rpc/types.js";
@@ -206,7 +206,7 @@ export class App {
 
 	private refreshSize(): void {
 		const { cols, rows } = this.term.size();
-		const inputH = this.input.getRequiredHeight(rows);
+		const inputH = this.input.getRequiredHeight(rows, inputTextWidth(cols));
 		this.layout = computeLayout(cols, rows, inputH);
 		this.screen.resize(cols, rows);
 		this.markDirty();
@@ -235,7 +235,7 @@ export class App {
 
 	private draw(): void {
 		const { cols, rows } = this.term.size();
-		const inputH = this.input.getRequiredHeight(rows);
+		const inputH = this.input.getRequiredHeight(rows, inputTextWidth(cols));
 		this.layout = computeLayout(cols, rows, inputH);
 		const layout = this.layout;
 		if (!layout) {
@@ -516,7 +516,7 @@ export class App {
 				if (delta < 0) this.tree.handleKey("up");
 				else this.tree.handleKey("down");
 			} else if (isInRect(evt.x, evt.y, layout.inputLine)) {
-				if (this.input.getLines().length > inner(layout.inputLine).h) {
+				if (this.input.hasOverflow()) {
 					if (delta < 0) this.input.scrollBy(-1);
 					else this.input.scrollBy(1);
 				} else {
@@ -1205,7 +1205,7 @@ export class App {
 			const scrollX = r.x + r.w - 1;
 			const scrollY = r.y + 1;
 			const scrollH = r.h - 2;
-			if (r.h > 4 && this.input.getLines().length > inner(r).h && evt.x === scrollX && evt.y >= scrollY && evt.y < scrollY + scrollH) {
+			if (r.h > 4 && this.input.hasOverflow() && evt.x === scrollX && evt.y >= scrollY && evt.y < scrollY + scrollH) {
 				if (evt.y === scrollY) {
 					this.input.scrollBy(-1);
 					return;
@@ -1457,11 +1457,11 @@ export class App {
 				this.input.end();
 				return;
 			case "pageup":
-				if (this.input.getLines().length > 1) this.input.scrollBy(-5);
+				if (this.input.hasOverflow()) this.input.scrollBy(-5);
 				else this.panel.pageUp(10);
 				return;
 			case "pagedown":
-				if (this.input.getLines().length > 1) this.input.scrollBy(5);
+				if (this.input.hasOverflow()) this.input.scrollBy(5);
 				else this.panel.pageDown(10);
 				return;
 			case "enter": {
