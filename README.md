@@ -153,7 +153,7 @@ npm run check
 │  10-Menu Bar │ Project Tree │ Agent Panel (DOS)  │
 │  Double-buffered ANSI cell screen (DOS Palette)  │
 └─────────────────────────┬────────────────────────┘
-                          │ JSONL over stdio (pi --mode rpc --no-session)
+                          │ JSONL over stdio (pi --mode rpc)
                           ▼
 ┌──────────────────────────────────────────────────┐
 │                      PI                          │

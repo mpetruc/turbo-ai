@@ -2,9 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PiClient } from "../src/rpc/pi-client.js";
+import { PiClient, defaultRpcArgs } from "../src/rpc/pi-client.js";
 
 const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-pi.mjs");
+
+test("default RPC launch args persist pi sessions", () => {
+	const args = defaultRpcArgs();
+	assert.ok(args.includes("--mode"), "RPC mode must be enabled by default");
+	assert.ok(
+		!args.includes("--no-session"),
+		"--no-session disables session persistence; sessions must be saved so /save, /open, and /resume work",
+	);
+});
 
 function createClient(): PiClient {
 	return new PiClient({ command: process.execPath, args: [fixture], cwd: process.cwd() });

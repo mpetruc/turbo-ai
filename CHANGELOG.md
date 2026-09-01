@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed session persistence: Pi is launched without `--no-session`, so conversations are saved to `~/.pi/agent/sessions/` and `/save`, `/open`, `/resume`, and recent session history work as documented.
+
 ## 1.0.2-beta - 2026-08-31
 
 - Added global `turbo-ai` launcher (`npm link` / `npm install -g .`) so the app starts from any folder.

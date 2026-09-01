@@ -14,6 +14,17 @@ function windowsCmdLine(command: string, args: string[]): string {
 	return /\s/.test(command) ? `""${command}"${suffix}"` : `${command}${suffix}`;
 }
 
+/**
+ * Default RPC launch arguments for pi.
+ *
+ * Sessions must be persisted (no `--no-session`): pi saves them to
+ * `~/.pi/agent/sessions/<cwd>/` and the TUI's /save, /open, /resume and
+ * recent-sessions features read exactly that directory.
+ */
+export function defaultRpcArgs(): string[] {
+	return ["--mode", "rpc"];
+}
+
 export interface PiClientOptions {
 	/** Command used to launch pi. Defaults to "pi" (resolved via PATH). */
 	command?: string;
@@ -51,7 +62,7 @@ export class PiClient extends EventEmitter {
 
 	start(): Promise<void> {
 		const command = this.options.command ?? process.env.PI_CMD ?? "pi";
-		const args = this.options.args ?? ["--mode", "rpc", "--no-session"];
+		const args = this.options.args ?? defaultRpcArgs();
 		const needsWindowsShell = process.platform === "win32"
 			&& (command.toLowerCase() === "pi" || /\.(cmd|bat)$/i.test(command));
 		let spawnCommand = command;
