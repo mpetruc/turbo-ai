@@ -55,6 +55,19 @@ test("eventToEntries maps tool_execution_start", () => {
 	assert.equal(res.entries[0].text, "src/a.ts");
 });
 
+test("eventToEntries: toolcall_end emits no duplicate tool entry", () => {
+	const res = eventToEntries({
+		type: "message_update",
+		message: { role: "assistant", content: [] },
+		assistantMessageEvent: {
+			type: "toolcall_end",
+			contentIndex: 0,
+			toolCall: { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "npm test" } },
+		},
+	});
+	assert.equal(res.entries.length, 0, "toolcall_end must not create an empty [TOOL] stub entry");
+});
+
 test("eventToEntries marks tool errors", () => {
 	const res = eventToEntries({
 		type: "tool_execution_end",
