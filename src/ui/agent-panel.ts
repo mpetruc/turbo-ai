@@ -310,7 +310,7 @@ export class AgentPanel {
 					}
 					const userPromptAttr = packAttr(THEME.userLabel);
 					const userTextAttr = packAttr(THEME.userText);
-					for (const raw of wrapText(e.text, width - 2)) {
+					for (const raw of wrapText(e.text, Math.max(1, width - 2))) {
 						out.push({
 							segments: [
 								{ text: "> ", attr: userPromptAttr },
@@ -378,17 +378,24 @@ export class AgentPanel {
 
 					const bodyTheme = e.isError ? THEME.errorText : THEME.agentText;
 					const body = e.text ? ` ${e.text}` : "";
+					const bodyW = Math.max(1, width - 8);
+					const bodyChunks = wrapText(body, bodyW);
 					out.push({
 						segments: [
 							{ text: tag.padEnd(8), attr: packAttr(tagTheme) },
-							{ text: body.slice(0, width - 8), attr: packAttr(bodyTheme) },
+							{ text: bodyChunks[0] ?? "", attr: packAttr(bodyTheme) },
 						],
 					});
+					for (let i = 1; i < bodyChunks.length; i++) {
+						out.push({ segments: [{ text: bodyChunks[i]!, attr: packAttr(bodyTheme) }] });
+					}
 					break;
 				}
 
 				case "info":
-					out.push({ segments: [{ text: e.text.slice(0, width), attr: packAttr(THEME.dimText) }] });
+					for (const wrapped of wrapText(e.text, Math.max(1, width))) {
+						out.push({ segments: [{ text: wrapped, attr: packAttr(THEME.dimText) }] });
+					}
 					break;
 			}
 		}
@@ -402,13 +409,35 @@ export class AgentPanel {
 	}
 }
 
+/**
+ * Wrap text to a width, breaking at word boundaries; a word longer than the
+ * width is hard-broken at the width. Lossless: the concatenation of the
+ * returned chunks is always the original text.
+ */
 function wrapText(text: string, width: number): string[] {
 	if (width <= 0) return [text];
 	if (text.length <= width) return [text];
 	const lines: string[] = [];
-	for (let i = 0; i < text.length; i += width) {
-		lines.push(text.slice(i, i + width));
+	let i = 0;
+	while (text.length - i > width) {
+		let k = -1;
+		for (let j = i + width - 1; j >= i; j--) {
+			if (text[j] === " ") {
+				k = j;
+				break;
+			}
+		}
+		if (k >= 0) {
+			// Include the breaking space at the end of the chunk.
+			lines.push(text.slice(i, k + 1));
+			i = k + 1;
+		} else {
+			// No space in the window: hard-break the long word.
+			lines.push(text.slice(i, i + width));
+			i = i + width;
+		}
 	}
+	lines.push(text.slice(i));
 	return lines;
 }
 
