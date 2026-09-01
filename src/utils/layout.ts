@@ -58,6 +58,13 @@ export function computeLayout(cols: number, rows: number, inputHeight = 3): Layo
 	return { menuBar, desktop, projectPane, agentPane, inputLine, keyBar, cols, rows };
 }
 
+/** Width of the input window's text area for a given terminal columns. */
+export function inputTextWidth(cols: number): number {
+	const treeW = Math.min(38, Math.max(20, Math.round(cols * 0.28)));
+	const rightW = cols - treeW;
+	return Math.max(1, rightW - 6);
+}
+
 /** Interior area of a bordered rect (shrunk by the frame). */
 export function inner(r: Rect): Rect {
 	return { x: r.x + 1, y: r.y + 1, w: Math.max(0, r.w - 2), h: Math.max(0, r.h - 2) };
