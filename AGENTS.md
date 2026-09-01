@@ -71,6 +71,11 @@ still open. Delete the branch once main contains everything.
 
 - `node_modules` is **platform-specific**. After any OS switch on a checkout,
   run `npm ci` before building or testing. Never commit `node_modules`.
+- Prefer `npm install` for day-to-day work (near no-op when the tree is in
+  sync, and it reconciles `package-lock.json` if the two drift apart). Use
+  `npm ci` when switching operating systems, after pulling changes that
+  touched the lockfile, or whenever `node_modules` looks suspect — it wipes
+  the tree and reinstalls exactly what the lockfile pins.
 - Prefer **one native checkout per OS** over sharing a single working tree
   across WSL/Windows boundaries.
 - Line endings are pinned by `.gitattributes` (LF everywhere). If `git status`
