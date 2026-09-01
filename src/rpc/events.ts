@@ -1,4 +1,4 @@
-import type { RpcEvent, ToolCallContent } from "./types.js";
+import type { RpcEvent } from "./types.js";
 
 export type EntryKind = "user" | "agent" | "tool" | "error" | "info" | "thinking";
 
@@ -74,13 +74,6 @@ export function firstLine(s: string, maxLen: number): string {
 }
 
 /** Extract the toolCall object from a stream event if present. */
-export function extractToolCall(evt: { toolCall?: unknown }): ToolCallContent | undefined {
-	if (evt.toolCall && typeof evt.toolCall === "object" && "name" in evt.toolCall) {
-		return evt.toolCall as ToolCallContent;
-	}
-	return undefined;
-}
-
 /**
  * Convert a raw RPC event into zero or more agent panel entries.
  * Pure function — the panel just appends the results.
@@ -113,13 +106,11 @@ export function eventToEntries(event: RpcEvent): {
 			if (e.type === "text_start" || e.type === "thinking_start") {
 				return { entries: [], streamReset: true };
 			}
+			// toolcall_end marks the model's synthesized call; execution events
+			// (tool_execution_start/end) are the single source of tool rows, so no
+			// entry is created here — emitting one left a stray empty [TOOL] stub.
 			if (e.type === "toolcall_end") {
-				const tc = extractToolCall(e);
-				if (tc) {
-					return {
-						entries: [{ kind: "tool", text: "", tag: toolTag(tc.name), isError: false }],
-					};
-				}
+				return { entries: [] };
 			}
 			if (e.type === "error") {
 				const errMsg = e.errorMessage ?? e.reason ?? "Model error";
