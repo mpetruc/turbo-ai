@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed session persistence: Pi is launched without `--no-session`, so conversations are saved to `~/.pi/agent/sessions/` and `/save`, `/open`, `/resume`, and recent session history work as documented.
+
 ## 1.0.2-beta - 2026-08-31
 
 - Hardened Pi process lifecycle, shutdown, and reconnect handling.
