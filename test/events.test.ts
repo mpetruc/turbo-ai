@@ -55,6 +55,11 @@ test("eventToEntries maps tool_execution_start", () => {
 	assert.equal(res.entries[0].text, "src/a.ts");
 });
 
+test("eventToEntries tags tool_execution_start entries with toolCallId", () => {
+	const res = eventToEntries({ type: "tool_execution_start", toolCallId: "call_7", toolName: "edit", args: { path: "a.ts" } });
+	assert.equal(res.entries[0]?.toolCallId, "call_7");
+});
+
 test("eventToEntries: toolcall_end emits no duplicate tool entry", () => {
 	const res = eventToEntries({
 		type: "message_update",
@@ -66,6 +71,35 @@ test("eventToEntries: toolcall_end emits no duplicate tool entry", () => {
 		},
 	});
 	assert.equal(res.entries.length, 0, "toolcall_end must not create an empty [TOOL] stub entry");
+});
+
+test("eventToEntries routes tool_execution_update partial output to toolUpdate", () => {
+	const res = eventToEntries({
+		type: "tool_execution_update",
+		toolCallId: "call_1",
+		toolName: "bash",
+		partialResult: { content: [{ type: "text", text: "compiling...\nok" }] },
+	});
+	assert.equal(res.entries.length, 0);
+	assert.deepEqual(res.toolUpdate, { toolCallId: "call_1", text: "compiling...\nok", isError: false });
+});
+
+test("eventToEntries routes successful tool_execution_end to toolUpdate", () => {
+	const res = eventToEntries({
+		type: "tool_execution_end",
+		toolCallId: "call_1",
+	toolName: "bash",
+		isError: false,
+		result: { content: [{ type: "text", text: "1 passed\n2 skipped" }] },
+	});
+	assert.equal(res.entries.length, 0);
+	assert.deepEqual(res.toolUpdate, { toolCallId: "call_1", text: "1 passed\n2 skipped", isError: false });
+});
+
+test("eventToEntries: empty successful tool result produces no update", () => {
+	const res = eventToEntries({ type: "tool_execution_end", toolCallId: "call_1", toolName: "read", isError: false });
+	assert.equal(res.entries.length, 0);
+	assert.equal(res.toolUpdate, undefined);
 });
 
 test("eventToEntries marks tool errors", () => {

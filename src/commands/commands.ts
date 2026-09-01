@@ -637,14 +637,64 @@ export function parseJsonlSession(filePath: string): ParsedSession {
 							} else if (part.type === "tool_call" || part.type === "tool_use" || part.name) {
 								const tName = part.name ?? part.toolName ?? "tool";
 								const summary = toolSummary(tName, part.arguments ?? part.input ?? {});
-								entries.push({ kind: "tool", tag: summary.tag, text: summary.text });
+								entries.push({
+									kind: "tool",
+									tag: summary.tag,
+									text: summary.text,
+									toolCallId: part.toolCallId ?? part.id ?? undefined,
+								});
 							}
 						}
+					}
+				} else if (role === "toolResult") {
+					const toolText = Array.isArray(msgContent)
+						? msgContent
+								.filter((c: any) => c.type === "text" && typeof c.text === "string")
+								.map((c: any) => c.text)
+								.join("\n")
+								.trim()
+						: "";
+					if (!toolText) continue;
+					const isErr = Boolean(obj.message.isError);
+					const callId = obj.message.toolCallId;
+					let last: any;
+					for (let i = entries.length - 1; i >= 0; i--) {
+						const e = entries[i];
+						if (!e || e.kind !== "tool") continue;
+						if (e.toolCallId && e.toolCallId === callId) { last = e; break; }
+						if (!last && !e.resultText) last = e;
+					}
+					if (last) {
+						last.resultText = toolText;
+						last.isError = isErr;
+					} else {
+						entries.push({
+							kind: "tool",
+							text: "",
+							tag: isErr ? "[ERROR]" : "[OK]",
+							isError: isErr,
+							resultText: toolText,
+						});
 					}
 				}
 			} else if (obj.type === "tool_execution_start") {
 				const summary = toolSummary(obj.toolName ?? "tool", obj.args);
-				entries.push({ kind: "tool", tag: summary.tag, text: summary.text });
+				let last: any;
+				// A session may contain both the assistant tool_call part and the
+				// execution record for the same call; keep a single row per call.
+				// Match by id first, else the most recent unclaimed row with the
+				// same summary (ordered pairing for id-less assistant parts).
+				for (let i = entries.length - 1; i >= 0; i--) {
+					const e = entries[i];
+					if (!e || e.kind !== "tool") continue;
+					if (e.toolCallId && e.toolCallId === obj.toolCallId) { last = e; break; }
+					if (!last && !e.toolCallId && !e.resultText && e.tag === summary.tag && e.text === summary.text) last = e;
+				}
+				if (last) {
+					last.toolCallId = last.toolCallId ?? obj.toolCallId;
+				} else {
+					entries.push({ kind: "tool", tag: summary.tag, text: summary.text, toolCallId: obj.toolCallId });
+				}
 			}
 		}
 	} catch (err: unknown) {
