@@ -152,3 +152,40 @@ test("tool output can be expanded past the preview", () => {
 	assert.ok(rows.some((r) => r.text.includes("line11")), "expanded output shows all lines");
 	assert.ok(!rows.some((r) => r.text.includes("more lines")), "no ellipsis when expanded");
 });
+
+test("AgentPanel wraps agent prose at word boundaries", () => {
+	const p = new AgentPanel();
+	p.addEntry({ kind: "agent", text: "the quick brown fox jumps over the lazy dog" });
+	const rows = renderRows(p, 20, 10); // inner width 18
+	assert.equal(rows[0], "the quick brown");
+	assert.equal(rows[1], "fox jumps over");
+	assert.equal(rows[2], "the lazy dog");
+});
+
+test("AgentPanel re-wraps prose when the pane width changes", () => {
+	const p = new AgentPanel();
+	p.addEntry({ kind: "agent", text: "the quick brown fox jumps over the lazy dog" });
+	const narrow = renderRows(p, 20, 10); // inner width 18
+	assert.equal(narrow[0], "the quick brown");
+
+	const wide = renderRows(p, 40, 10); // inner width 38
+	assert.equal(wide[0], "the quick brown fox jumps over the");
+	assert.equal(wide[1], "lazy dog");
+});
+
+test("AgentPanel wraps tool output instead of truncating it", () => {
+	const p = new AgentPanel();
+	p.addEntry({ kind: "tool", tag: "[BASH]", text: "alpha beta gamma delta" });
+	const rows = renderRows(p, 22, 10); // inner width 20, body width 14
+	assert.equal(rows[0], "[BASH]   alpha beta");
+	assert.equal(rows[1], "gamma delta");
+});
+
+test("AgentPanel hard-breaks unbreakable words without losing characters", () => {
+	const word = "A".repeat(40);
+	const p = new AgentPanel();
+	p.addEntry({ kind: "agent", text: word });
+	const rows = renderRows(p, 20, 10); // inner width 18
+	assert.equal(rows[0], "A".repeat(18));
+	assert.equal(rows.join(""), "A".repeat(40));
+});
