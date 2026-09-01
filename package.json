@@ -4,9 +4,13 @@
   "description": "Turbo Pascal 7 inspired TUI frontend for the Pi coding agent (RPC mode)",
   "type": "module",
   "main": "dist/main.js",
+  "bin": {
+    "turbo-ai": "bin/turbo-ai.js"
+  },
   "scripts": {
     "dev": "tsx src/main.ts",
     "build": "tsc",
+    "prepare": "npm run build",
     "start": "node dist/main.js",
     "test": "tsx --test test/*.test.ts",
     "check": "npm run build && npm test"
