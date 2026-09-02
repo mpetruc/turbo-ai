@@ -18,6 +18,7 @@ const HELP_LINES: Array<[string, string]> = [
 	["Ctrl+F", "Find in files (filter tree)"],
 	["Ctrl+L", "Clear agent message history"],
 	["Ctrl+C", "Copy selection / cancel command"],
+	["Ctrl+T", "Toggle thinking block"],
 	["Alt+X", "Exit to DOS / terminal"],
 	["Esc", "Close dialog / cancel / unfocus"],
 ];
