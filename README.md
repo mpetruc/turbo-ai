@@ -133,6 +133,31 @@ npm start -- --dir C:/path/to/project
 
 Changing the directory from the File menu reconnects Pi in the selected project and starts a new backend session. If the new connection fails, the current project and session stay active.
 
+### Preview builds (pending PRs — before they land upstream):
+
+While pull requests are still under review on the canonical repository (`kvv256512-ux/turbo-ai`), the latest integrated work lives on the `run` / `integration/pending` branches of the development fork (`mpetruc/turbo-ai`). That branch combines every pending fix and feature, and its full test suite is green (`npm run check`).
+
+```bash
+# Everything at once (integration of all pending PRs):
+git clone -b integration/pending https://github.com/mpetruc/turbo-ai.git
+cd turbo-ai
+npm ci
+npm run build
+npm link          # one-time — registers the global `turbo-ai` command
+turbo-ai          # from any folder; targets the current directory
+```
+
+`integration/pending` is an alias of `run`; either name works.
+
+To test a single pull request in isolation, clone its branch instead:
+
+```bash
+git clone -b fix/agent-tool-row-duplication https://github.com/mpetruc/turbo-ai.git
+npm ci && npm run build && npm start
+```
+
+Note: per-PR branches are based on `main` and predate the global launcher, so use `npm run dev` / `npm start` there. Once the PRs are merged upstream, switch back to cloning `https://github.com/kvv256512-ux/turbo-ai.git`.
+
 ### Running unit tests:
 ```bash
 npm test
