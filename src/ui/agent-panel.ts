@@ -53,8 +53,28 @@ export class AgentPanel {
 		this.trim();
 	}
 
-	appendThinkingDelta(delta: string): void {
+	/**
+	 * Accumulate a thinking chunk. When the provider flushes the reasoning tail
+	 * AFTER the answer has already started streaming (a bare thinking_delta with
+	 * no preceding thinking_start), the chunk is rejoined into the thinking
+	 * block that is on screen instead of opening a second "▸ Thinking" row
+	 * mid-answer. Pass startNewBlock=true when a thinking_start preceded the
+	 * chunk (a genuine new reasoning phase).
+	 */
+	appendThinkingDelta(delta: string, startNewBlock = true): void {
 		if (!this.thinkingOpen) {
+			if (!startNewBlock) {
+				// Late trailing chunk of the closed thinking block: append it to the
+				// most recent thinking entry so the reasoning stays a single block.
+				for (let i = this.entries.length - 1; i >= 0; i--) {
+					const e = this.entries[i];
+					if (e && e.kind === "thinking") {
+						e.text += delta;
+						this.trim();
+						return;
+					}
+				}
+			}
 			this.closeStream();
 			this.entries.push({ kind: "thinking", text: "" });
 			this.thinkingOpen = true;

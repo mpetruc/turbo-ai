@@ -103,6 +103,8 @@ export class App {
 	private activeSelection: { kind: "agent" | "input" | "text" | "diff" } | null = null;
 	private planMode = false;
 	private thinkingLevel: string | null = null;
+	/** True between a thinking_start event and the next thinking_delta: that delta opens a NEW thinking block. */
+	private thinkingBlockPending = false;
 	private recentSessions: RecentSession[] = [];
 	private readonly clientEventHandler = (evt: RpcEvent): void => this.onRpcEvent(evt);
 	private readonly clientResponseHandler = (resp: RpcResponse): void => this.onRpcResponse(resp);
@@ -369,6 +371,7 @@ export class App {
 		if (res.agentEnded) {
 			this.isStreaming = false;
 			this.requestStart = null;
+			this.thinkingBlockPending = false;
 			this.stopSpinner();
 			this.panel.closeStream();
 			void this.pollStats();
@@ -377,12 +380,22 @@ export class App {
 			return;
 		}
 		if (res.streamReset) {
+			this.thinkingBlockPending = false;
+			this.panel.closeStream();
+			this.markDirty();
+			return;
+		}
+		if (res.thinkingBlockStart) {
+			// thinking_start: close whatever stream is open; the next thinking_delta
+			// starts a genuinely new thinking block (not a late trailing chunk).
+			this.thinkingBlockPending = true;
 			this.panel.closeStream();
 			this.markDirty();
 			return;
 		}
 		if (res.thinkingDelta !== undefined) {
-			this.panel.appendThinkingDelta(res.thinkingDelta);
+			this.panel.appendThinkingDelta(res.thinkingDelta, this.thinkingBlockPending);
+			this.thinkingBlockPending = false;
 			this.markDirty();
 			return;
 		}
@@ -394,6 +407,7 @@ export class App {
 		if (res.error) {
 			this.isStreaming = false;
 			this.requestStart = null;
+			this.thinkingBlockPending = false;
 			this.stopSpinner();
 			this.panel.closeStream();
 			this.flash(`Error: ${res.error}`);

@@ -90,6 +90,8 @@ export function eventToEntries(event: RpcEvent): {
 	streamDelta?: string;
 	thinkingDelta?: string;
 	streamReset?: boolean;
+	/** A thinking block boundary was signaled (thinking_start): the next thinking_delta opens a NEW thinking block. */
+	thinkingBlockStart?: boolean;
 	agentStarted?: boolean;
 	agentEnded?: boolean;
 	error?: string;
@@ -110,7 +112,14 @@ export function eventToEntries(event: RpcEvent): {
 			if (e.type === "thinking_delta" && typeof e.delta === "string") {
 				return { entries: [], thinkingDelta: e.delta };
 			}
-			if (e.type === "text_start" || e.type === "thinking_start") {
+			if (e.type === "thinking_start") {
+				// A thinking block boundary, not a text-stream reset: the next
+				// thinking_delta legitimately starts a NEW thinking block (unlike a
+				// bare thinking_delta that arrives mid-answer, which is a trailing
+				// chunk of the block already being displayed).
+				return { entries: [], thinkingBlockStart: true };
+			}
+			if (e.type === "text_start") {
 				return { entries: [], streamReset: true };
 			}
 			if (e.type === "toolcall_end") {
