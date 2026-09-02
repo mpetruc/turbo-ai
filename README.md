@@ -1,85 +1,5 @@
 > ⚠️ **This is a preview build.** This `run` / `integration/pending` branch bundles every pending pull request — unreviewed, unmerged work — not the released version. For the stable release, clone the canonical repository (`https://github.com/kvv256512-ux/turbo-ai.git`, branch `main`).
 
-## 🛠️ Installation & Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/kvv256512-ux/turbo-ai.git
-cd turbo-ai
-
-# Install dependencies
-npm install
-
-# Run in development mode
-npm run dev
-
-# Build for production
-npm run build
-
-# Start compiled version
-npm start
-```
-
-### Running from any folder (global command):
-
-Register the global `turbo-ai` launcher once, then start it from any project directory — it always targets the folder you are in:
-
-```bash
-# One-time (from the repository folder)
-npm link
-
-# Then, from any project:
-cd ~/my-project
-turbo-ai
-```
-
-An alternative one-time install is `npm install -g .` from the repository folder. The launcher runs the compiled `dist/` build, and the `prepare` script rebuilds it automatically during linking/installing.
-
-### Running in a specific directory:
-```bash
-turbo-ai --dir C:/path/to/project
-npm start -- --dir C:/path/to/project
-```
-
-Changing the directory from the File menu reconnects Pi in the selected project and starts a new backend session. If the new connection fails, the current project and session stay active.
-
-### Preview builds (pending PRs — before they land upstream):
-
-While pull requests are still under review on the canonical repository (`kvv256512-ux/turbo-ai`), the latest integrated work lives on the `run` / `integration/pending` branches of the development fork (`mpetruc/turbo-ai`). That branch combines every pending fix and feature, and its full test suite is green (`npm run check`).
-
-```bash
-# Everything at once (integration of all pending PRs):
-git clone -b integration/pending https://github.com/mpetruc/turbo-ai.git
-cd turbo-ai
-npm ci
-npm run build
-npm link          # one-time — registers the global `turbo-ai` command
-turbo-ai          # from any folder; targets the current directory
-```
-
-`integration/pending` is an alias of `run`; either name works.
-
-To test a single pull request in isolation, clone its branch instead:
-
-```bash
-git clone -b fix/agent-tool-row-duplication https://github.com/mpetruc/turbo-ai.git
-npm ci && npm run build && npm start
-```
-
-Note: per-PR branches are based on `main` and predate the global launcher, so use `npm run dev` / `npm start` there. Once the PRs are merged upstream, switch back to cloning `https://github.com/kvv256512-ux/turbo-ai.git`.
-
-### Running unit tests:
-```bash
-npm test
-```
-
-### Running all checks:
-```bash
-npm run check
-```
-
----
-
 # TURBO-AI 1.0.2 Beta
 
 [![Version](https://img.shields.io/badge/version-1.0.2%20Beta-blue.svg)](https://github.com/kvv256512-ux/turbo-ai)
@@ -169,6 +89,86 @@ npm run check
 - **Windows 10/11**, Linux, or macOS
 - **Terminal**: Modern terminal with ANSI/VT and 16-color support (e.g. *Windows Terminal*, VS Code terminal, iTerm2, Alacritty).
 - **Pi coding agent**: Installed and available on PATH (`pi --version`). Tested with `@earendil-works/pi-coding-agent` >= 0.78.0.
+
+---
+
+## 🛠️ Installation & Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/kvv256512-ux/turbo-ai.git
+cd turbo-ai
+
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run dev
+
+# Build for production
+npm run build
+
+# Start compiled version
+npm start
+```
+
+### Running from any folder (global command):
+
+Register the global `turbo-ai` launcher once, then start it from any project directory — it always targets the folder you are in:
+
+```bash
+# One-time (from the repository folder)
+npm link
+
+# Then, from any project:
+cd ~/my-project
+turbo-ai
+```
+
+An alternative one-time install is `npm install -g .` from the repository folder. The launcher runs the compiled `dist/` build, and the `prepare` script rebuilds it automatically during linking/installing.
+
+### Running in a specific directory:
+```bash
+turbo-ai --dir C:/path/to/project
+npm start -- --dir C:/path/to/project
+```
+
+Changing the directory from the File menu reconnects Pi in the selected project and starts a new backend session. If the new connection fails, the current project and session stay active.
+
+### Preview builds (pending PRs — before they land upstream):
+
+While pull requests are still under review on the canonical repository (`kvv256512-ux/turbo-ai`), the latest integrated work lives on the `run` / `integration/pending` branches of the development fork (`mpetruc/turbo-ai`). That branch combines every pending fix and feature, and its full test suite is green (`npm run check`).
+
+```bash
+# Everything at once (integration of all pending PRs):
+git clone -b integration/pending https://github.com/mpetruc/turbo-ai.git
+cd turbo-ai
+npm ci
+npm run build
+npm link          # one-time — registers the global `turbo-ai` command
+turbo-ai          # from any folder; targets the current directory
+```
+
+`integration/pending` is an alias of `run`; either name works.
+
+To test a single pull request in isolation, clone its branch instead:
+
+```bash
+git clone -b fix/agent-tool-row-duplication https://github.com/mpetruc/turbo-ai.git
+npm ci && npm run build && npm start
+```
+
+Note: per-PR branches are based on `main` and predate the global launcher, so use `npm run dev` / `npm start` there. Once the PRs are merged upstream, switch back to cloning `https://github.com/kvv256512-ux/turbo-ai.git`.
+
+### Running unit tests:
+```bash
+npm test
+```
+
+### Running all checks:
+```bash
+npm run check
+```
 
 ---
 
