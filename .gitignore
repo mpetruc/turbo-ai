@@ -8,6 +8,7 @@ Thumbs.db
 
 
 # Coding-agent harness artifacts (local only)
+AGENTS.md
 .pi/
 .serena/
 .setup_complete
