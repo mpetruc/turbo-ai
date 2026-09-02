@@ -5,6 +5,35 @@ import type { Screen } from "./screen.js";
 const MAX_TEXT_ROWS = 8;
 
 /**
+ * Terminal display width of a single character: wide CJK/emoji glyphs occupy
+ * two columns. Kept local so this module builds without the wide-character
+ * screen.ts work (which lands with the agent-output fix; consolidate into a
+ * shared util once both are on main).
+ */
+function charWidth(ch: string): number {
+	const code = ch.charCodeAt(0);
+	if (Number.isNaN(code) || code < 0x1100) return 1;
+	if (code >= 0xd800 && code <= 0xdfff) return 1; // surrogate half
+	if (
+		code <= 0x115f || // Hangul Jamo
+		code === 0x2329 || code === 0x232a || // angle brackets
+		(code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) || // CJK radicals .. Yi
+		(code >= 0xac00 && code <= 0xd7a3) || // Hangul syllables
+		(code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+		(code >= 0xfe10 && code <= 0xfe19) || // vertical forms
+		(code >= 0xfe30 && code <= 0xfe6f) || // CJK compatibility forms
+		(code >= 0xff00 && code <= 0xff60) || // fullwidth forms
+		(code >= 0xffe0 && code <= 0xffe6) || // fullwidth signs
+		(code >= 0x1f300 && code <= 0x1f64f) || // emoji
+		(code >= 0x1f900 && code <= 0x1f9ff) || // supplemental emoji
+		(code >= 0x20000 && code <= 0x3fffd) // CJK ext. B+
+	) {
+		return 2;
+	}
+	return 1;
+}
+
+/**
  * Turbo Pascal style message input prompt window with adaptive multi-line height,
  * soft word-wrap, vertical and horizontal cursor navigation, editing, scrolling,
  * history, and mouse selection.
@@ -41,9 +70,32 @@ export class InputLine {
 		if (text.length === 0) return [{ start: 0, end: 0 }];
 		const segments: Array<{ start: number; end: number }> = [];
 		let i = 0;
-		while (text.length - i > width) {
+		// Advance from `from` until the next char would exceed `width` columns.
+		const consume = (from: number): number => {
+			let w = 0;
+			let j = from;
+			while (j < text.length) {
+				const cw = charWidth(text[j]!);
+				if (w + cw > width) break;
+				w += cw;
+				j++;
+			}
+			return j;
+		};
+		while (true) {
+			const end = consume(i);
+			if (end - i <= 0) {
+				// Degenerate width: not even one column fits; keep the text lossless.
+				segments.push({ start: i, end: i + 1 });
+				i += 1;
+				continue;
+			}
+			if (end >= text.length) {
+				segments.push({ start: i, end: text.length });
+				break;
+			}
 			let k = -1;
-			for (let j = i + width - 1; j >= i; j--) {
+			for (let j = end - 1; j >= i; j--) {
 				if (text[j] === " ") {
 					k = j;
 					break;
@@ -53,11 +105,10 @@ export class InputLine {
 				segments.push({ start: i, end: k + 1 });
 				i = k + 1;
 			} else {
-				segments.push({ start: i, end: i + width });
-				i = i + width;
+				segments.push({ start: i, end });
+				i = end;
 			}
 		}
-		segments.push({ start: i, end: text.length });
 		return segments;
 	}
 
@@ -394,11 +445,15 @@ export class InputLine {
 			const prefix = vi === 0 ? "> " : "  ";
 			screen.text(innerX, rowY, prefix, promptAttr);
 
+			// Accumulate display columns from the start of the visual row so wide
+			// characters (CJK/emoji) don't shift subsequent glyphs out of the box.
+			let colX = textX;
 			for (let ci = seg.start; ci < seg.end; ci++) {
 				const ch = lineText[ci] ?? "";
 				const charGlobalIdx = lineOffset[seg.line]! + ci;
 				const isSel = selStart !== null && selEnd !== null && charGlobalIdx >= selStart && charGlobalIdx < selEnd;
-				screen.setCell(textX + (ci - seg.start), rowY, ch, isSel ? selAttr : bgAttr);
+				screen.setCell(colX, rowY, ch, isSel ? selAttr : bgAttr);
+				colX += charWidth(ch);
 			}
 		}
 

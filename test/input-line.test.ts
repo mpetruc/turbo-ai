@@ -240,3 +240,62 @@ test("InputLine selection maps click coordinates through wrapped rows", () => {
 	input.clearSelection();
 	assert.equal(input.getSelectedText(), null);
 });
+
+// ------------------------------------------------------------ wide characters
+
+test("InputLine wraps wide characters by display columns, not code units", () => {
+	const input = new InputLine();
+	// 5 CJK chars = 10 display columns -> two rows at width 8: 4 chars + 1 char
+	input.value = "文".repeat(5);
+	assert.deepEqual(input.getVisualRows(8), [
+		{ line: 0, start: 0, end: 4 },
+		{ line: 0, start: 4, end: 5 },
+	]);
+
+	// Mixed ASCII + CJK: "a文b文" = 1+2+1+2 = 6 columns; width 6 fits one row,
+	// width 5 must break before the last wide char.
+	input.value = "a文b文";
+	assert.deepEqual(input.getVisualRows(6), [{ line: 0, start: 0, end: 4 }]);
+	assert.deepEqual(input.getVisualRows(5), [
+		{ line: 0, start: 0, end: 3 },
+		{ line: 0, start: 3, end: 4 },
+	]);
+});
+
+test("InputLine never drops characters when a wide char exceeds the wrap width", () => {
+	const input = new InputLine();
+	input.value = "文x";
+	// Width 1: not even one column fits a wide char; the lossless guard emits
+	// one char per row instead of looping forever or dropping text.
+	assert.deepEqual(input.getVisualRows(1), [
+		{ line: 0, start: 0, end: 1 },
+		{ line: 0, start: 1, end: 2 },
+	]);
+});
+
+test("InputLine keeps wide input text inside the input window", () => {
+	const screen = new Screen(60, 20);
+	const input = new InputLine();
+	input.value = "abc文def"; // 8 display columns -> fits one text row
+	input.cursorPos = input.value.length;
+	input.render(screen, WIN, true);
+
+	// Rendered glyphs sit at display-column offsets, not code-unit offsets:
+	// '文' occupies textX+3 (two columns), so the next ASCII glyph lands at
+	// textX+5, not textX+4. (Its second column is owned by the wide glyph -
+	// filled with a continuation marker once the screen.ts wide-char work is
+	// merged - so we assert the written glyph positions, not the hole.)
+	assert.equal(screen.getCell(INNER_X + 2 + 3, INNER_Y)?.ch, "文");
+	assert.equal(screen.getCell(INNER_X + 2 + 5, INNER_Y)?.ch, "d");
+	assert.equal(screen.getCell(INNER_X + 2 + 6, INNER_Y)?.ch, "e");
+	assert.equal(screen.getCell(INNER_X + 2 + 7, INNER_Y)?.ch, "f");
+
+	// Nothing outside the window rect may be written - in particular the
+	// Files-pane columns to the left of the input window must stay clean.
+	for (let y = 0; y < 20; y++) {
+		for (let x = 0; x < 60; x++) {
+			if (x >= WIN.x && x < WIN.x + WIN.w && y >= WIN.y && y < WIN.y + WIN.h) continue;
+			assert.equal(screen.getCell(x, y)?.ch, " ", `cell outside input window (${x},${y}) was overwritten`);
+		}
+	}
+});
