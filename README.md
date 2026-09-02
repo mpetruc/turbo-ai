@@ -1,3 +1,5 @@
+> ⚠️ **This is a preview build.** This `run` / `integration/pending` branch bundles every pending pull request — unreviewed, unmerged work — not the released version. For the stable release, clone the canonical repository (`https://github.com/kvv256512-ux/turbo-ai.git`, branch `main`).
+
 # TURBO-AI 1.0.2 Beta
 
 [![Version](https://img.shields.io/badge/version-1.0.2%20Beta-blue.svg)](https://github.com/kvv256512-ux/turbo-ai)
