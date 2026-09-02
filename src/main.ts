@@ -189,13 +189,19 @@ export class App {
 	private loop(): void {
 		const tick = () => {
 			if (this.closed) return;
-			if (this.dirty) {
+			const wasDirty = this.dirty;
+			if (wasDirty) {
 				this.dirty = false;
 				this.draw();
 			}
-			setImmediate(tick);
+			// Throttle the idle loop: a queued setImmediate forces libuv's poll
+			// timeout to 0, so the event loop spins continuously (~100% of one
+			// core) even when nothing is dirty. With a positive timeout the poll
+			// phase sleeps; redraws stay at <=60fps while active and the idle
+			// wakeup rate drops to 20/s.
+			setTimeout(tick, wasDirty ? 16 : 50);
 		};
-		setImmediate(tick);
+		setTimeout(tick, 50);
 	}
 
 	private markDirty(): void {
