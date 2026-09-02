@@ -8,6 +8,64 @@ interface Cell {
 const EMPTY_CELL: Cell = { ch: " ", attr: -1 };
 
 /**
+ * Marker stored in the second cell of a wide (2-column) character. The cell
+ * is consumed by the flush and never emitted, keeping the app's cell model
+ * column-aligned with the terminal's display.
+ */
+const CONTINUATION = "\u0000";
+
+/**
+ * Display width of a single UTF-16 code unit as rendered by a VT terminal.
+ * CJK ideographs, Hangul, fullwidth forms and wide emoji occupy 2 columns.
+ * Surrogate halves are width 1 each so an emoji passes through as an adjacent
+ * pair (2 columns total); a lone half degrades to a replacement glyph instead
+ * of breaking layout. Box-drawing / arrows / block glyphs are width 1.
+ */
+export function charDisplayWidth(ch: string): number {
+	const code = ch.charCodeAt(0);
+	if (Number.isNaN(code) || code < 0x1100) return 1;
+	if (code >= 0xd800 && code <= 0xdfff) return 1; // surrogate half
+	if (
+		code <= 0x115f || // Hangul Jamo
+		code === 0x2329 || code === 0x232a || // angle brackets
+		(code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) || // CJK radicals .. Yi
+		(code >= 0xac00 && code <= 0xd7a3) || // Hangul syllables
+		(code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+		(code >= 0xfe10 && code <= 0xfe19) || // vertical forms
+		(code >= 0xfe30 && code <= 0xfe6f) || // CJK compatibility forms
+		(code >= 0xff00 && code <= 0xff60) || // fullwidth forms
+		(code >= 0xffe0 && code <= 0xffe6) || // fullwidth signs
+		(code >= 0x1f300 && code <= 0x1f64f) || // emoji
+		(code >= 0x1f900 && code <= 0x1f9ff) || // supplemental emoji
+		(code >= 0x20000 && code <= 0x3fffd) // CJK ext. B+
+	) {
+		return 2;
+	}
+	return 1;
+}
+
+/** Total display width of a string in terminal columns. */
+export function displayWidth(s: string): number {
+	let w = 0;
+	for (const ch of s) w += charDisplayWidth(ch);
+	return w;
+}
+
+/** Longest prefix of `s` whose display width is at most `limit` columns. */
+export function truncateToWidth(s: string, limit: number): string {
+	if (limit <= 0) return "";
+	let width = 0;
+	let out = "";
+	for (const ch of s) {
+		const w = charDisplayWidth(ch);
+		if (width + w > limit) break;
+		out += ch;
+		width += w;
+	}
+	return out;
+}
+
+/**
  * Double-buffered cell screen. Renders with pure ANSI (CUP + SGR), works in
  * Windows Terminal and any VT-compatible terminal. Full repaint per frame is
  * fine at TUI sizes; frames are coalesced by the caller.
@@ -72,20 +130,45 @@ export class Screen {
 		x = Math.round(x);
 		y = Math.round(y);
 		if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return;
+		if (ch === CONTINUATION) return; // never place the marker itself
 		const cell = this.cells[y * this.cols + x];
-		if (cell) {
-			cell.ch = ch;
-			cell.attr = attr;
+		if (!cell) return;
+		const w = charDisplayWidth(ch);
+		if (w > 1) {
+			// Wide char: occupies x and x+1. Clipped at the right edge — a wide
+			// char at the last column would wrap onto the next terminal row.
+			if (x + 1 >= this.cols) {
+				cell.ch = " ";
+				cell.attr = attr;
+				return;
+			}
+			const next = this.cells[y * this.cols + x + 1];
+			if (next) {
+				next.ch = CONTINUATION;
+				next.attr = attr;
+			}
 		}
+		cell.ch = ch;
+		cell.attr = attr;
 	}
 
 	text(x: number, y: number, s: string, attr: number): void {
-		for (let i = 0; i < s.length; i++) this.setCell(x + i, y, s.charAt(i), attr);
+		for (const ch of s) {
+			const w = charDisplayWidth(ch);
+			if (x + w > this.cols) break;
+			this.setCell(x, y, ch, attr);
+			x += w;
+		}
 	}
 
 	textClipped(x: number, y: number, s: string, w: number, attr: number): void {
-		const max = Math.min(s.length, w);
-		for (let i = 0; i < max; i++) this.setCell(x + i, y, s.charAt(i), attr);
+		const limit = x + w;
+		for (const ch of s) {
+			const cw = charDisplayWidth(ch);
+			if (x + cw > limit) break;
+			this.setCell(x, y, ch, attr);
+			x += cw;
+		}
 	}
 
 	fill(x: number, y: number, w: number, h: number, attr: number, ch = " "): void {
@@ -112,8 +195,8 @@ export class Screen {
 		if (title && title.length > 0 && w > 4) {
 			const t = ` ${title} `;
 			const tx = x + 2;
-			const maxLen = Math.min(t.length, w - 4);
-			this.text(tx, y, t.slice(0, maxLen), titleAttr ?? attr);
+			const tt = truncateToWidth(t, w - 4);
+			this.text(tx, y, tt, titleAttr ?? attr);
 		}
 	}
 
@@ -178,9 +261,10 @@ export class Screen {
 			const t = ` ${title} `;
 			const avail = w - leftReserved - rightReserved;
 			if (avail > 4) {
-				const maxLen = Math.min(t.length, avail);
-				const tx = x + Math.floor((w - maxLen) / 2);
-				this.text(tx, y, t.slice(0, maxLen), titleAttr ?? attr);
+				const tt = truncateToWidth(t, avail);
+				const tw = displayWidth(tt);
+				const tx = x + Math.floor((w - tw) / 2);
+				this.text(tx, y, tt, titleAttr ?? attr);
 			}
 		}
 	}
@@ -288,7 +372,16 @@ export class Screen {
 				const idx = y * this.cols + x;
 				const c = this.cells[idx];
 				const p = this.prev[idx];
-				if (!c || !p || (p.ch === c.ch && p.attr === c.attr)) continue;
+				if (!c || !p) continue;
+				if (c.ch === CONTINUATION) {
+					// Second half of a wide char: consumed by the char at x-1; adopt
+					// into prev and never emit. Keeps the model column-aligned with
+					// the terminal so runs can never drift past the right margin.
+					p.ch = c.ch;
+					p.attr = c.attr;
+					continue;
+				}
+				if (p.ch === c.ch && p.attr === c.attr) continue;
 				if (curX !== x || curY !== y) out += `\x1b[${y + 1};${x + 1}H`;
 				if (c.attr !== curAttr) {
 					out += sgrFor(c.attr);
@@ -297,7 +390,7 @@ export class Screen {
 				out += c.ch;
 				p.ch = c.ch;
 				p.attr = c.attr;
-				curX = x + 1;
+				curX = x + charDisplayWidth(c.ch);
 				curY = y;
 				if (curX >= this.cols) {
 					curX = -1;

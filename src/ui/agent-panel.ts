@@ -1,7 +1,7 @@
 import { packAttr, THEME, type ColorAttr } from "../theme/turbo-pascal.js";
 import { inner, type Rect } from "../utils/layout.js";
 import type { AgentEntry } from "../rpc/events.js";
-import type { Screen } from "./screen.js";
+import { charDisplayWidth, truncateToWidth, type Screen } from "./screen.js";
 
 interface RenderLine {
 	segments: Array<{ text: string; attr: number }>;
@@ -339,11 +339,12 @@ export class AgentPanel {
 			for (const seg of line.segments) {
 				if (x >= area.x + area.w) break;
 				for (let i = 0; i < seg.text.length; i++) {
-					if (x >= area.x + area.w) break;
 					const char = seg.text[i]!;
+					const cw = charDisplayWidth(char);
+					if (x + cw > area.x + area.w) break;
 					const isSel = sel ? isPosInSelection(lineIdx, col, sel) : false;
 					screen.setCell(x, area.y + row, char, isSel ? selAttr : seg.attr);
-					x++;
+					x += cw;
 					col++;
 				}
 			}
@@ -402,7 +403,7 @@ export class AgentPanel {
 						const label = live
 							? `▸ Thinking [ ${thinking!.spinner} ] (${thinking!.elapsedSec.toFixed(1)}s)`
 							: "▸ Thinking";
-						out.push({ segments: [{ text: label.slice(0, width), attr: packAttr(live ? THEME.thinkingLive : THEME.thinkingText) }] });
+						out.push({ segments: [{ text: truncateToWidth(label, width), attr: packAttr(live ? THEME.thinkingLive : THEME.thinkingText) }] });
 					} else {
 						const thinkAttr = packAttr(THEME.thinkingText);
 						const rawLines = e.text.split("\n");
@@ -422,7 +423,7 @@ export class AgentPanel {
 						if (raw.startsWith("```")) {
 							inCodeBlock = !inCodeBlock;
 							out.push({
-								segments: [{ text: raw.slice(0, width), attr: packAttr(THEME.agentComment) }],
+								segments: [{ text: truncateToWidth(raw, width), attr: packAttr(THEME.agentComment) }],
 							});
 							continue;
 						}
@@ -481,7 +482,7 @@ export class AgentPanel {
 							? wrapAllLines(e.resultText, resultWidth)
 							: resultExcerptLines(e.resultText, resultWidth, 10, e.resultLines);
 						for (const raw of resLines) {
-							out.push({ segments: [{ text: `  ${raw}`.slice(0, width), attr: resAttr }] });
+							out.push({ segments: [{ text: truncateToWidth(`  ${raw}`, width), attr: resAttr }] });
 						}
 					}
 					break;
@@ -497,7 +498,7 @@ export class AgentPanel {
 
 		if (thinking && !this.thinkingCollapsed) {
 			const thinkingStr = ` ╟ Thinking [ ${thinking.spinner} ] (${thinking.elapsedSec.toFixed(1)}s)`;
-			out.push({ segments: [{ text: thinkingStr.slice(0, width), attr: packAttr(THEME.thinkingText) }] });
+			out.push({ segments: [{ text: truncateToWidth(thinkingStr, width), attr: packAttr(THEME.thinkingText) }] });
 		}
 
 		return out;
@@ -505,18 +506,42 @@ export class AgentPanel {
 }
 
 /**
- * Wrap text to a width, breaking at word boundaries; a word longer than the
- * width is hard-broken at the width. Lossless: the concatenation of the
- * returned chunks is always the original text.
+ * Wrap text to a display width (columns), breaking at word boundaries; a word
+ * longer than the width is hard-broken at the width. Wide characters count 2
+ * columns. Lossless: the concatenation of the returned chunks is always the
+ * original text.
  */
 function wrapText(text: string, width: number): string[] {
 	if (width <= 0) return [text];
-	if (text.length <= width) return [text];
+	if (displayWidthOf(text) <= width) return [text];
 	const lines: string[] = [];
 	let i = 0;
-	while (text.length - i > width) {
+	// Advance from `from` until the next char would exceed `width` columns.
+	const consume = (from: number): number => {
+		let w = 0;
+		let j = from;
+		while (j < text.length) {
+			const cw = charDisplayWidth(text[j]!);
+			if (w + cw > width) break;
+			w += cw;
+			j++;
+		}
+		return j;
+	};
+	while (true) {
+		const end = consume(i);
+		if (end - i <= 0) {
+			// Degenerate width: not even one column fits; keep the text lossless.
+			lines.push(text.slice(i, i + 1));
+			i += 1;
+			continue;
+		}
+		if (end >= text.length) {
+			lines.push(text.slice(i));
+			break;
+		}
 		let k = -1;
-		for (let j = i + width - 1; j >= i; j--) {
+		for (let j = end - 1; j >= i; j--) {
 			if (text[j] === " ") {
 				k = j;
 				break;
@@ -528,12 +553,17 @@ function wrapText(text: string, width: number): string[] {
 			i = k + 1;
 		} else {
 			// No space in the window: hard-break the long word.
-			lines.push(text.slice(i, i + width));
-			i = i + width;
+			lines.push(text.slice(i, end));
+			i = end;
 		}
 	}
-	lines.push(text.slice(i));
 	return lines;
+}
+
+function displayWidthOf(s: string): number {
+	let w = 0;
+	for (const ch of s) w += charDisplayWidth(ch);
+	return w;
 }
 
 /** Wrap every line of a (possibly multi-line) block to `width`. */
